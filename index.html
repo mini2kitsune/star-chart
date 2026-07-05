@@ -178,11 +178,12 @@
   <div class="app-name">星　図</div>
   <div class="app-sub">北極星への灯り</div>
   <input type="email" id="authEmail" placeholder="メールアドレス" autocomplete="email" autocapitalize="off" autocorrect="off">
-  <input type="password" id="authPassword" placeholder="パスワード（8文字以上）" autocomplete="new-password">
-  <button type="button" class="btn" id="authSignIn">ログイン</button>
-  <button type="button" class="btn quiet" id="authSignUp">新規登録</button>
+  <button type="button" class="btn" id="authMagicLink">メールでログインリンクを受け取る</button>
+  <div style="margin:16px 0 12px;font-size:11px;color:#B0A48F;letter-spacing:.1em">─ または ─</div>
+  <input type="password" id="authPassword" placeholder="パスワード（既に設定済みの方）" autocomplete="current-password">
+  <button type="button" class="btn quiet" id="authSignIn">パスワードでログイン</button>
   <div class="auth-msg" id="authMsg"></div>
-  <div style="margin-top:24px;font-size:10px;color:#B0A48F;letter-spacing:.1em">v0.3 · 2026-07-06 07:30</div>
+  <div style="margin-top:24px;font-size:10px;color:#B0A48F;letter-spacing:.1em">v0.4 · 2026-07-06 マジックリンク対応</div>
 </div>
 
 <!-- ========== アプリ本体（ログイン後表示） ========== -->
@@ -698,6 +699,36 @@ async function initAuth(){
 }
 
 // 認証ボタン
+async function handleMagicLink(){
+  console.log('handleMagicLink called');
+  if(!sbClient){ showAuthView('通信の準備が整っていません。\n少し待ってから再度お試しくだされ。'); return; }
+  const email = document.getElementById('authEmail').value.trim();
+  if(!email){ showAuthView('メールアドレスを入力してくだされ'); return; }
+  if(!/^.+@.+\..+$/.test(email)){ showAuthView('メールアドレスの形式が正しくないようでござる'); return; }
+  showAuthView('リンクを送信中…');
+  try{
+    const { data, error } = await sbClient.auth.signInWithOtp({
+      email: email,
+      options: {
+        emailRedirectTo: 'https://mini2kitsune.github.io/star-chart/'
+      }
+    });
+    if(error){
+      console.error('magicLink error:', error);
+      let msg = error.message || 'リンク送信に失敗しました';
+      if(/rate limit/i.test(msg)) msg = '試行回数が多すぎます。1分待って再試行してくだされ。';
+      else if(/invalid/i.test(msg)) msg = 'メールアドレスが不正のようでござる。ご確認を。';
+      showAuthView('送信失敗:\n' + msg);
+    }else{
+      console.log('magicLink sent', data);
+      showAuthView('ログインリンクをメールでお送りしました。\n\n受信箱をご確認いただき、\n「Confirm your email」または\n「星図にログイン」のリンクをタップしてくだされ。\n\n（迷惑メールフォルダも念のためご確認を）');
+    }
+  }catch(e){
+    console.error('magicLink exception:', e);
+    showAuthView('通信エラー:\n' + e.message);
+  }
+}
+
 async function handleSignIn(){
   console.log('handleSignIn called');
   if(!sbClient){ showAuthView('通信の準備が整っていません。\n少し待ってから再度お試しくだされ。'); return; }
@@ -710,7 +741,7 @@ async function handleSignIn(){
     if(error){
       console.error('signIn error:', error);
       let msg = error.message || 'ログインできませんでした';
-      if(/Invalid login credentials/i.test(msg)) msg = 'メールアドレスまたはパスワードが違います。\n新規登録がまだなら「新規登録」ボタンを。';
+      if(/Invalid login credentials/i.test(msg)) msg = 'メールアドレスまたはパスワードが違います。\nパスワード未設定の場合は上の「メールでログインリンクを受け取る」をご利用くだされ。';
       else if(/Email not confirmed/i.test(msg)) msg = 'メール確認が必要です。受信箱を確認してください。';
       else if(/rate limit/i.test(msg)) msg = '試行回数が多すぎます。5-10分待って再試行してくだされ。';
       showAuthView('ログイン失敗:\n' + msg);
@@ -723,38 +754,9 @@ async function handleSignIn(){
   }
 }
 
-async function handleSignUp(){
-  console.log('handleSignUp called');
-  if(!sbClient){ showAuthView('通信の準備が整っていません。\n少し待ってから再度お試しくだされ。'); return; }
-  const email = document.getElementById('authEmail').value.trim();
-  const password = document.getElementById('authPassword').value;
-  if(!email || !password){ showAuthView('メールとパスワードを入力してくだされ'); return; }
-  if(password.length < 8){ showAuthView('パスワードは8文字以上でお願いします'); return; }
-  showAuthView('登録中…');
-  try{
-    const { data, error } = await sbClient.auth.signUp({ email, password });
-    if(error){
-      console.error('signUp error:', error);
-      let msg = error.message || '登録できませんでした';
-      if(/already registered|already been registered|User already/i.test(msg)) msg = 'このメールは既に登録済み。\n「ログイン」ボタンから入ってくだされ。';
-      showAuthView('登録失敗:\n' + msg);
-    }else{
-      console.log('signUp success', data);
-      if(data && data.session){
-        showAuthView('登録完了！ログイン中…');
-      }else{
-        showAuthView('登録完了！\nそのまま「ログイン」ボタンを押してくだされ。');
-      }
-    }
-  }catch(e){
-    console.error('signUp exception:', e);
-    showAuthView('通信エラー:\n' + e.message);
-  }
-}
-
-// クリック・タッチ両対応（iOS Safariのタップ遅延対策）
+// クリック・タッチ両対応
+document.getElementById('authMagicLink').addEventListener('click', handleMagicLink);
 document.getElementById('authSignIn').addEventListener('click', handleSignIn);
-document.getElementById('authSignUp').addEventListener('click', handleSignUp);
 
 initAuth();
 

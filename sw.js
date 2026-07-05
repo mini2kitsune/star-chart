@@ -1,4 +1,4 @@
-const CACHE_NAME = 'star-chart-v03-auth-mobile';
+const CACHE_NAME = 'star-chart-v04-magic-link';
 const STATIC_ASSETS = [
   '/star-chart/',
   '/star-chart/index.html',
