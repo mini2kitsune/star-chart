@@ -177,11 +177,12 @@
 <div class="auth-wrap" id="authView" style="display:none;">
   <div class="app-name">星　図</div>
   <div class="app-sub">北極星への灯り</div>
-  <input type="email" id="authEmail" placeholder="メールアドレス" autocomplete="email">
-  <input type="password" id="authPassword" placeholder="パスワード（8文字以上）" autocomplete="current-password">
-  <button class="btn" id="authSignIn">ログイン</button>
-  <button class="btn quiet" id="authSignUp">新規登録</button>
+  <input type="email" id="authEmail" placeholder="メールアドレス" autocomplete="email" autocapitalize="off" autocorrect="off">
+  <input type="password" id="authPassword" placeholder="パスワード（8文字以上）" autocomplete="new-password">
+  <button type="button" class="btn" id="authSignIn">ログイン</button>
+  <button type="button" class="btn quiet" id="authSignUp">新規登録</button>
   <div class="auth-msg" id="authMsg"></div>
+  <div style="margin-top:24px;font-size:10px;color:#B0A48F;letter-spacing:.1em">v0.3 · 2026-07-06 07:30</div>
 </div>
 
 <!-- ========== アプリ本体（ログイン後表示） ========== -->
@@ -659,46 +660,57 @@ function showAppView(){
 }
 
 async function initAuth(){
+  document.getElementById('authMsg').textContent = 'アプリを準備中…';
   if(!window.supabase){
     // SDK 未ロード時は LocalStorage のみで動く（オフライン耐性）
+    console.warn('Supabase SDK not loaded, running in offline mode');
     showAppView();
     return;
   }
-  sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-  const { data: { session } } = await sbClient.auth.getSession();
-  if(session && session.user){
-    currentUser = session.user;
-    showAppView();
-    const merged = await loadFromSupabase();
-    if(merged > 0){ render(); toast(merged + '件の履歴を同期しました'); }
-  }else{
-    showAuthView();
-  }
-  sbClient.auth.onAuthStateChange(async (event, session) => {
+  try{
+    sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    console.log('Supabase client created');
+    const { data: { session } } = await sbClient.auth.getSession();
     if(session && session.user){
       currentUser = session.user;
       showAppView();
       const merged = await loadFromSupabase();
-      if(merged > 0){ render(); }
+      if(merged > 0){ render(); toast(merged + '件の履歴を同期しました'); }
     }else{
-      currentUser = null;
-      showAuthView();
+      showAuthView('メールとパスワードを入力してください。\n初めての方は「新規登録」を。');
     }
-  });
+    sbClient.auth.onAuthStateChange(async (event, session) => {
+      console.log('auth state:', event);
+      if(session && session.user){
+        currentUser = session.user;
+        showAppView();
+        const merged = await loadFromSupabase();
+        if(merged > 0){ render(); }
+      }else{
+        currentUser = null;
+        showAuthView();
+      }
+    });
+  }catch(e){
+    console.error('initAuth failed:', e);
+    showAuthView('初期化エラー:\n' + e.message);
+  }
 }
 
 // 認証ボタン
-document.getElementById('authSignIn').addEventListener('click', async () => {
+async function handleSignIn(){
+  console.log('handleSignIn called');
+  if(!sbClient){ showAuthView('通信の準備が整っていません。\n少し待ってから再度お試しくだされ。'); return; }
   const email = document.getElementById('authEmail').value.trim();
   const password = document.getElementById('authPassword').value;
   if(!email || !password){ showAuthView('メールとパスワードを入力してくだされ'); return; }
+  showAuthView('ログイン中…');
   try{
     const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
     if(error){
       console.error('signIn error:', error);
-      // ユーザーフレンドリーな翻訳
       let msg = error.message || 'ログインできませんでした';
-      if(/Invalid login credentials/i.test(msg)) msg = 'メールアドレスまたはパスワードが違います。\n新規登録が済んでいない場合は「新規登録」ボタンを。';
+      if(/Invalid login credentials/i.test(msg)) msg = 'メールアドレスまたはパスワードが違います。\n新規登録がまだなら「新規登録」ボタンを。';
       else if(/Email not confirmed/i.test(msg)) msg = 'メール確認が必要です。受信箱を確認してください。';
       else if(/rate limit/i.test(msg)) msg = '試行回数が多すぎます。5-10分待って再試行してくだされ。';
       showAuthView('ログイン失敗:\n' + msg);
@@ -709,12 +721,16 @@ document.getElementById('authSignIn').addEventListener('click', async () => {
     console.error('signIn exception:', e);
     showAuthView('通信エラー:\n' + e.message);
   }
-});
-document.getElementById('authSignUp').addEventListener('click', async () => {
+}
+
+async function handleSignUp(){
+  console.log('handleSignUp called');
+  if(!sbClient){ showAuthView('通信の準備が整っていません。\n少し待ってから再度お試しくだされ。'); return; }
   const email = document.getElementById('authEmail').value.trim();
   const password = document.getElementById('authPassword').value;
   if(!email || !password){ showAuthView('メールとパスワードを入力してくだされ'); return; }
   if(password.length < 8){ showAuthView('パスワードは8文字以上でお願いします'); return; }
+  showAuthView('登録中…');
   try{
     const { data, error } = await sbClient.auth.signUp({ email, password });
     if(error){
@@ -724,7 +740,6 @@ document.getElementById('authSignUp').addEventListener('click', async () => {
       showAuthView('登録失敗:\n' + msg);
     }else{
       console.log('signUp success', data);
-      // autoconfirm ON なら data.session が返る・そのままログイン状態になる
       if(data && data.session){
         showAuthView('登録完了！ログイン中…');
       }else{
@@ -735,7 +750,11 @@ document.getElementById('authSignUp').addEventListener('click', async () => {
     console.error('signUp exception:', e);
     showAuthView('通信エラー:\n' + e.message);
   }
-});
+}
+
+// クリック・タッチ両対応（iOS Safariのタップ遅延対策）
+document.getElementById('authSignIn').addEventListener('click', handleSignIn);
+document.getElementById('authSignUp').addEventListener('click', handleSignUp);
 
 initAuth();
 
