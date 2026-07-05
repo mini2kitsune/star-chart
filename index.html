@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>星図 — 北極星への灯り</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#FAF6EF">
@@ -395,15 +395,15 @@ html, body {
     <span class="nav-icon">✦</span>
     <span class="nav-text">今日</span>
   </button>
-  <button class="nav-item" onclick="showToast('準備中')">
+  <button class="nav-item" onclick="showToast('星座はまだ観測を始めたばかり。8週分の灯りが集まると、ここに現れます。')">
     <span class="nav-icon">◎</span>
     <span class="nav-text">星座</span>
   </button>
-  <button class="nav-item" onclick="showToast('準備中')">
+  <button class="nav-item" onclick="showToast('初回の週次レビューは 7/12（日）朝カフェで将軍と対話します。')">
     <span class="nav-icon">☰</span>
     <span class="nav-text">レビュー</span>
   </button>
-  <button class="nav-item" onclick="showToast('準備中')">
+  <button class="nav-item" onclick="showToast('設定は Phase 2 で追加予定。今週は観測に専念してくだされ。')">
     <span class="nav-icon">◉</span>
     <span class="nav-text">設定</span>
   </button>
@@ -417,17 +417,19 @@ html, body {
 
 // ── Routine definitions (Phase 1 hardcoded) ────────────────────────────────────
 // Source: config/star_chart_routines.yaml
+// Fable 5 の Q6 指摘反映：宣言状態を撤廃・状態は全て観測イベントから生まれる
+// Week 1 は全項目「未観測」で開始・タップにより灯る
 const ROUTINES = [
-  { id: 'R001', name: '起床・ストレッチ', timeslot: '朝',    hour: 6,    status: '部分点灯' },
-  { id: 'R002', name: '朝散歩',           timeslot: '朝',    hour: 6,    status: '未着手' },
-  { id: 'R004', name: 'AI英会話',         timeslot: '朝',    hour: 7,    status: '微睡み' },
-  { id: 'R005', name: 'IGストーリー',     timeslot: '朝',    hour: 8,    status: '点灯' },
-  { id: 'R006', name: '投資チェック',     timeslot: '朝',    hour: 9,    status: '部分点灯' },
-  { id: 'R011', name: '日曜カフェ',       timeslot: '日曜朝', hour: 9,   status: '点灯' },
-  { id: 'R012', name: 'Instagram制作',    timeslot: '柔軟',  hour: null, status: '部分点灯' },
-  { id: 'R015', name: '英語振り返り',     timeslot: '夜',    hour: 17,   status: '微睡み' },
-  { id: 'R017', name: 'ワインノート',     timeslot: '夜',    hour: 19,   status: '部分点灯' },
-  { id: 'R018', name: '読書・デトックス', timeslot: '夜',    hour: 22,   status: '部分点灯' },
+  { id: 'R001', name: '起床・ストレッチ', timeslot: '朝',    hour: 6,    status: 'active' },
+  { id: 'R002', name: '朝散歩',           timeslot: '朝',    hour: 6,    status: 'active' },
+  { id: 'R004', name: 'AI英会話',         timeslot: '朝',    hour: 7,    status: 'active' },
+  { id: 'R005', name: 'IGストーリー',     timeslot: '朝',    hour: 8,    status: 'active' },
+  { id: 'R006', name: '投資チェック',     timeslot: '朝',    hour: 9,    status: 'active' },
+  { id: 'R011', name: '日曜カフェ',       timeslot: '日曜朝', hour: 9,   status: 'active' },
+  { id: 'R012', name: 'Instagram制作',    timeslot: '柔軟',  hour: null, status: 'active' },
+  { id: 'R015', name: '英語振り返り',     timeslot: '夜',    hour: 17,   status: 'active' },
+  { id: 'R017', name: 'ワインノート',     timeslot: '夜',    hour: 19,   status: 'active' },
+  { id: 'R018', name: '読書・デトックス', timeslot: '夜',    hour: 22,   status: 'active' },
 ];
 
 // Timeslot ordering for display
@@ -470,14 +472,15 @@ function getLitIds() {
 function getActiveRoutines() {
   const isSunday = new Date().getDay() === 0;
   return ROUTINES.filter(r => {
-    if (r.status === '微睡み') return false;
     if (r.timeslot === '日曜朝' && !isSunday) return false;
     return true;
   });
 }
 
+// 微睡みは Phase 2 の心拍検知が実データから判定する
+// Week 1 は宣言状態を持たない・全項目 active
 function getSleepingRoutines() {
-  return ROUTINES.filter(r => r.status === '微睡み');
+  return [];
 }
 
 // ── Toggle ─────────────────────────────────────────────────────────────────────
@@ -624,7 +627,9 @@ function showToast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+  // メッセージ長により時間調整（20字以下: 1.8s / 長文: 4s）
+  const duration = msg.length > 20 ? 4000 : 1800;
+  _toastTimer = setTimeout(() => t.classList.remove('show'), duration);
 }
 window.showToast = showToast;
 
