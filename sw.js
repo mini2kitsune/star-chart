@@ -1,4 +1,4 @@
-const CACHE_NAME = 'star-chart-v1';
+const CACHE_NAME = 'star-chart-v2-fable5';
 const STATIC_ASSETS = [
   '/star-chart/',
   '/star-chart/index.html',

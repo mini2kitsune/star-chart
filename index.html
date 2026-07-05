@@ -1,643 +1,563 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#FAF6EF">
 <title>星図 — 北極星への灯り</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#FAF6EF">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="星図">
 <meta name="mobile-web-app-capable" content="yes">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;500&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+<!--
+  星図 v0.2-f — Fable 5 完全版（弧の意匠を含む）
+  ================================================
+  Opus 4.7 版 v0.1 と同じ設計書・同じ10項目を、設計者自身が
+  実装するとどうなるかを示す参照コード。移植する価値があるのは
+  UI ではなくデータ層の3原則:
+
+    原則1: 台帳は追記専用（append-only）。消灯もイベントである。
+    原則2: 1日は 04:00 に始まる（dayKey 関数に一元化）。
+    原則3: 状態は保存しない。すべてイベントからの導出である。
+           殿の決断（休眠・廃止・変質）もイベントとして刻む。
+
+  コードは4層に分かれ、第2層（純粋関数）は DOM に一切触れない。
+  心拍検知（Phase 2）も純粋関数として同梱済み — 判定材料となる
+  イベントが2週間分たまれば、そのまま動く。
+
+  PWA シェル（manifest.json / sw.js）は Opus 版 v0.1 と同一で
+  よいため、この参考実装には含めない。
+-->
 <style>
-/* === Base === */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  /* ============ 世界観トークン ============ */
+  :root{
+    --ivory:      #FAF6EF;   /* 地 */
+    --paper:      #F3EDE2;   /* チップ・カードの面 */
+    --ink:        #3C2F20;   /* 文字は常にこの系統。琥珀を文字に使わない */
+    --ink-soft:   #8A7A64;   /* 副情報 */
+    --line:       #E5DCCB;   /* 罫線 */
+    --amber:      #D4882A;   /* 灯り。面・帯・ドット専用 */
+    --amber-soft: #EFD9B8;   /* 部分点灯の面 */
+    --dim:        #CBBFAC;   /* 微睡み＝薄れる */
+    --serif: "Noto Serif JP", "Hiragino Mincho ProN", serif;
+    --sans:  "Noto Sans JP", "Hiragino Kaku Gothic ProN", sans-serif;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html{ -webkit-text-size-adjust:100%; }
+  body{
+    font-family:var(--sans); background:var(--ivory); color:var(--ink);
+    max-width:430px; margin:0 auto; min-height:100dvh;
+    display:flex; flex-direction:column;
+    padding-bottom:calc(64px + env(safe-area-inset-bottom));
+  }
+  button{ font:inherit; color:inherit; background:none; border:none; cursor:pointer; }
+  button:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; border-radius:8px; }
 
-:root {
-  --ivory:      #FAF6EF;
-  --amber:      #D4882A;
-  --amber-bg:   #FDF3E3;
-  --ink:        #3C2F20;
-  --ink-soft:   #6B5B4B;
-  --ink-mute:   #9A8C7C;
-  --hair:       #E7DECB;
-  --hair-light: #F0EAE0;
-  --sans:   'Noto Sans JP', system-ui, sans-serif;
-  --serif:  'Noto Serif JP', 'YuMincho', 'Hiragino Mincho ProN', serif;
-}
+  /* ============ ヘッダー ============ */
+  header{ padding:28px 20px 10px; }
+  .app-title{ font-family:var(--serif); font-size:15px; letter-spacing:.35em; color:var(--ink-soft); }
+  .date-line{ font-family:var(--serif); font-size:22px; margin-top:10px; font-weight:600; }
+  .rate-row{ display:flex; align-items:baseline; justify-content:space-between; margin-top:18px; }
+  .rate-label{ font-size:12px; color:var(--ink-soft); letter-spacing:.15em; }
+  .rate-value{ font-family:var(--serif); font-size:18px; font-weight:600; } /* 文字は ink。琥珀にしない */
+  .rate-bar{ height:3px; background:var(--line); border-radius:2px; margin-top:8px; overflow:hidden; }
+  .rate-fill{ height:100%; width:0%; background:var(--amber); border-radius:2px; transition:width .5s ease; }
 
-html, body {
-  background: var(--ivory);
-  color: var(--ink);
-  font-family: var(--sans);
-  font-size: 14px;
-  min-height: 100vh;
-  -webkit-font-smoothing: antialiased;
-}
+  /* ============ 日の弧（表示専用・入力はチップ） ============ */
+  .arc-wrap{ padding:10px 10px 0; }
+  .arc-wrap svg{ display:block; width:100%; height:auto; }
 
-.app {
-  max-width: 430px;
-  margin: 0 auto;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  padding-bottom: 72px;
-}
+  /* ============ 星座（この7日の弧） ============ */
+  .const-wrap{ padding:26px 20px; }
+  .const-title{ font-family:var(--serif); font-size:13px; font-weight:600; color:var(--ink-soft); letter-spacing:.25em; margin-bottom:16px; }
+  .week{ display:flex; gap:6px; }
+  .day-cell{ flex:1; text-align:center; }
+  .day-cell svg{ width:100%; height:auto; display:block; }
+  .day-label{ font-size:11px; color:var(--ink-soft); margin-top:5px; }
+  .day-rate{ font-size:12px; font-family:var(--serif); color:var(--ink); margin-top:2px; }
+  .const-note{ font-size:12px; color:var(--ink-soft); line-height:1.9; margin-top:22px; border-top:1px solid var(--line); padding-top:14px; }
 
-/* === Header === */
-.header {
-  padding: 20px 20px 14px;
-  border-bottom: 1px solid var(--hair);
-}
+  /* ============ チップ群 ============ */
+  main{ flex:1; }
+  .group{ padding:20px 20px 0; }
+  .group h2{
+    font-family:var(--serif); font-size:13px; font-weight:600;
+    color:var(--ink-soft); letter-spacing:.25em; margin-bottom:12px;
+  }
+  .chips{ display:flex; flex-wrap:wrap; gap:10px; }
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    background:var(--paper); border:1px solid var(--line);
+    border-radius:999px; padding:10px 16px; font-size:14px;
+    transition:background .25s ease, border-color .25s ease, opacity .25s ease;
+    min-height:44px; /* タップ標的 */
+  }
+  .chip .star{ width:8px; height:8px; border-radius:50%; background:var(--line); transition:background .25s ease; }
+  .chip[aria-pressed="true"]{ background:var(--amber); border-color:var(--amber); color:#FFF9EF; }
+  .chip[aria-pressed="true"] .star{ background:#FFF3DF; }
+  .chip.half-lit{ background:var(--amber-soft); border-color:var(--amber-soft); }
+  .chip.dormant{ opacity:.45; } /* 微睡みは薄れる。色は変えない */
+  .chip .sub{
+    font-size:11px; padding:3px 9px; border-radius:999px;
+    border:1px solid var(--line); background:var(--ivory); color:var(--ink-soft);
+    min-height:26px;
+  }
+  .chip[aria-pressed="true"] .sub{ border-color:rgba(255,249,239,.5); background:transparent; color:#FFF9EF; }
 
-.header-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 10px;
-}
+  /* 点灯の瞬間 — このシステム唯一の贅沢 */
+  @keyframes ignite{ from{ box-shadow:0 0 0 0 rgba(212,136,42,.40);} to{ box-shadow:0 0 0 16px rgba(212,136,42,0);} }
+  .chip.ignite{ animation:ignite .45s ease-out; }
+  @media (prefers-reduced-motion: reduce){ .chip.ignite{ animation:none; } .rate-fill{ transition:none; } }
 
-.app-name {
-  font-family: var(--serif);
-  font-size: 19px;
-  font-weight: 400;
-  color: var(--ink);
-  letter-spacing: 0.06em;
-}
+  /* ============ 微睡み ============ */
+  .dormant-line{ padding:26px 20px 8px; }
+  .dormant-line button{ font-size:12px; color:var(--ink-soft); letter-spacing:.1em; }
+  .dormant-list{ padding:4px 20px 0; font-size:12px; color:var(--ink-soft); line-height:1.9; }
+  .dormant-list:empty{ display:none; }
 
-.today-date {
-  font-size: 12px;
-  color: var(--ink-mute);
-  font-weight: 300;
-}
+  /* ============ 設定ビュー ============ */
+  .view{ display:none; }
+  .view.active{ display:block; }
+  .settings{ padding:24px 20px; }
+  .settings h2{ font-family:var(--serif); font-size:16px; margin-bottom:6px; }
+  .settings p{ font-size:12px; color:var(--ink-soft); line-height:1.9; margin-bottom:18px; }
+  .settings .btn{
+    display:block; width:100%; text-align:center;
+    border:1px solid var(--ink); border-radius:12px;
+    padding:13px; font-size:14px; margin-bottom:12px; background:var(--ivory);
+  }
+  .settings .btn.quiet{ border-color:var(--line); color:var(--ink-soft); }
+  .meta{ font-size:11px; color:var(--ink-soft); line-height:2; margin-top:20px; border-top:1px solid var(--line); padding-top:14px; }
 
-.lit-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+  /* ============ ナビ（今日・設定の2タブのみ） ============ */
+  nav{
+    position:fixed; bottom:0; left:50%; transform:translateX(-50%);
+    width:100%; max-width:430px; display:flex;
+    background:var(--ivory); border-top:1px solid var(--line);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  nav button{ flex:1; padding:14px 0 12px; font-size:12px; color:var(--ink-soft); letter-spacing:.2em; }
+  nav button[aria-current="page"]{ color:var(--ink); font-weight:600; }
 
-.lit-bar-label {
-  font-size: 11px;
-  color: var(--ink-mute);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.lit-bar-track {
-  flex: 1;
-  height: 4px;
-  background: var(--hair);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.lit-bar-fill {
-  height: 100%;
-  background: var(--amber);
-  border-radius: 2px;
-  transition: width 0.4s ease;
-}
-
-.lit-bar-pct {
-  font-size: 11px;
-  color: var(--amber);
-  font-weight: 500;
-  white-space: nowrap;
-  min-width: 28px;
-  text-align: right;
-}
-
-/* === Timeline === */
-.timeline-section {
-  padding: 14px 20px 12px;
-  border-bottom: 1px solid var(--hair-light);
-}
-
-.timeline-bar {
-  display: flex;
-  gap: 2px;
-  height: 16px;
-  margin-bottom: 4px;
-}
-
-.tl-seg {
-  flex: 1;
-  border-radius: 2px;
-  background: var(--hair-light);
-  transition: background 0.3s ease;
-}
-
-.tl-seg.lit {
-  background: var(--amber);
-}
-
-.timeline-hours {
-  display: flex;
-  justify-content: space-between;
-  font-size: 9px;
-  color: var(--ink-mute);
-  padding: 0 1px;
-  letter-spacing: 0.02em;
-}
-
-/* === Chips Section === */
-.chips-section {
-  padding: 16px 20px;
-  flex: 1;
-}
-
-.timeslot-group {
-  margin-bottom: 18px;
-}
-
-.timeslot-label {
-  font-size: 10px;
-  color: var(--ink-mute);
-  letter-spacing: 0.12em;
-  margin-bottom: 8px;
-  font-weight: 500;
-  text-transform: none;
-}
-
-.chips-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 8px 14px;
-  border: 1.5px solid var(--hair);
-  border-radius: 20px;
-  background: var(--ivory);
-  color: var(--ink-soft);
-  font-family: var(--sans);
-  font-size: 13px;
-  font-weight: 400;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
-  line-height: 1;
-}
-
-.chip:active {
-  transform: scale(0.96);
-}
-
-.chip.lit {
-  background: var(--amber-bg);
-  border-color: var(--amber);
-  color: var(--amber);
-  font-weight: 500;
-}
-
-.chip.lit::before {
-  content: '✦ ';
-  font-size: 9px;
-  vertical-align: middle;
-}
-
-/* === Sleeping Stars === */
-.sleeping-section {
-  padding: 0 20px 16px;
-}
-
-.sleeping-divider {
-  height: 1px;
-  background: var(--hair);
-  margin-bottom: 10px;
-}
-
-.sleeping-toggle {
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ink-mute);
-  font-family: var(--sans);
-  font-size: 12px;
-  font-weight: 300;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.sleeping-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1px solid var(--ink-mute);
-  font-size: 10px;
-  opacity: 0.65;
-  flex-shrink: 0;
-}
-
-.sleeping-arrow {
-  font-size: 14px;
-  line-height: 1;
-  opacity: 0.5;
-}
-
-.sleeping-list {
-  display: none;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.sleeping-list.open {
-  display: flex;
-}
-
-.chip.sleeping {
-  opacity: 0.32;
-  border-style: dashed;
-  cursor: default;
-  pointer-events: none;
-  font-size: 12px;
-}
-
-/* === Nav Bar === */
-.nav-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: var(--ivory);
-  border-top: 1px solid var(--hair);
-  display: flex;
-  height: 62px;
-  z-index: 100;
-  max-width: 430px;
-  margin: 0 auto;
-  right: max(0px, calc(50% - 215px));
-  left: max(0px, calc(50% - 215px));
-}
-
-.nav-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  cursor: pointer;
-  gap: 3px;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.nav-icon {
-  font-size: 16px;
-  line-height: 1;
-  color: var(--ink-mute);
-}
-
-.nav-text {
-  font-family: var(--sans);
-  font-size: 10px;
-  color: var(--ink-mute);
-  font-weight: 300;
-}
-
-.nav-item.active .nav-icon,
-.nav-item.active .nav-text {
-  color: var(--amber);
-}
-
-.nav-item.active .nav-text {
-  font-weight: 500;
-}
-
-/* === Toast === */
-.toast {
-  position: fixed;
-  bottom: 78px;
-  left: 50%;
-  transform: translateX(-50%) translateY(6px);
-  background: rgba(60, 47, 32, 0.88);
-  color: var(--ivory);
-  padding: 8px 18px;
-  border-radius: 20px;
-  font-size: 12px;
-  opacity: 0;
-  transition: all 0.22s ease;
-  pointer-events: none;
-  white-space: nowrap;
-  z-index: 200;
-}
-
-.toast.show {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
+  /* ============ Toast ============ */
+  .toast{
+    position:fixed; bottom:calc(78px + env(safe-area-inset-bottom)); left:50%;
+    transform:translateX(-50%) translateY(8px);
+    background:var(--ink); color:var(--ivory); font-size:12px;
+    padding:9px 18px; border-radius:999px; opacity:0; pointer-events:none;
+    transition:opacity .3s ease, transform .3s ease; max-width:86%;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
 
-<div class="app">
+<header>
+  <div class="app-title">星　図</div>
+  <div class="date-line" id="dateLine">—</div>
+  <div class="rate-row">
+    <span class="rate-label">今日の灯り</span>
+    <span class="rate-value" id="rateValue">—</span>
+  </div>
+  <div class="rate-bar"><div class="rate-fill" id="rateFill"></div></div>
+</header>
 
-  <!-- Header -->
-  <header class="header">
-    <div class="header-top">
-      <span class="app-name">星図</span>
-      <span class="today-date" id="today-date"></span>
+<main>
+  <!-- ========== 今日ビュー ========== -->
+  <section class="view active" id="view-today">
+    <div class="arc-wrap" aria-hidden="true" id="arcToday"></div>
+    <div id="groups"></div>
+    <div class="dormant-line">
+      <button id="dormantToggle" aria-expanded="false">眠っている星 <span id="dormantCount">0</span> ›</button>
     </div>
-    <div class="lit-bar-row">
-      <span class="lit-bar-label">今日の灯り</span>
-      <div class="lit-bar-track">
-        <div class="lit-bar-fill" id="lit-bar-fill" style="width:0%"></div>
-      </div>
-      <span class="lit-bar-pct" id="lit-bar-pct">—</span>
-    </div>
-  </header>
+    <div class="dormant-list" id="dormantList" hidden></div>
+  </section>
 
-  <!-- Timeline -->
-  <section class="timeline-section">
-    <div class="timeline-bar" id="timeline-bar"></div>
-    <div class="timeline-hours">
-      <span>06</span><span>10</span><span>14</span><span>18</span><span>22</span>
+  <!-- ========== 星座ビュー（眺めるだけの画面 — 弧の正しい住所） ========== -->
+  <section class="view" id="view-const">
+    <div class="const-wrap">
+      <div class="const-title">こ　の　7　日</div>
+      <div class="week" id="weekArcs"></div>
+      <div class="const-note">7日分の弧に、灯った星だけが残ります。<br>数字は各日の灯り率。評価ではなく、観測です。</div>
     </div>
   </section>
 
-  <!-- Chips -->
-  <section class="chips-section" id="chips-section"></section>
-
-  <!-- Sleeping Stars -->
-  <section class="sleeping-section">
-    <div class="sleeping-divider"></div>
-    <button class="sleeping-toggle" id="sleeping-toggle">
-      <span>眠っている星</span>
-      <span class="sleeping-count" id="sleeping-count">2</span>
-      <span class="sleeping-arrow" id="sleeping-arrow">›</span>
-    </button>
-    <div class="sleeping-list" id="sleeping-list"></div>
+  <!-- ========== 設定ビュー（空白は招待状 — 最初の住人は台帳の保全） ========== -->
+  <section class="view" id="view-settings">
+    <div class="settings">
+      <h2>台帳の保全</h2>
+      <p>星図の資産は蓄積された灯りの記録そのものです。<br>ときどき書き出して、安全な場所に置いてください。</p>
+      <button class="btn" id="exportBtn">記録を書き出す（JSON）</button>
+      <button class="btn quiet" id="importBtn">記録を読み込む（マージ・上書きしない）</button>
+      <input type="file" id="importFile" accept="application/json" hidden>
+      <div class="meta" id="metaInfo"></div>
+    </div>
   </section>
+</main>
 
-</div>
-
-<!-- Nav Bar -->
-<nav class="nav-bar">
-  <button class="nav-item active">
-    <span class="nav-icon">✦</span>
-    <span class="nav-text">今日</span>
-  </button>
-  <button class="nav-item" onclick="showToast('星座はまだ観測を始めたばかり。8週分の灯りが集まると、ここに現れます。')">
-    <span class="nav-icon">◎</span>
-    <span class="nav-text">星座</span>
-  </button>
-  <button class="nav-item" onclick="showToast('初回の週次レビューは 7/12（日）朝カフェで将軍と対話します。')">
-    <span class="nav-icon">☰</span>
-    <span class="nav-text">レビュー</span>
-  </button>
-  <button class="nav-item" onclick="showToast('設定は Phase 2 で追加予定。今週は観測に専念してくだされ。')">
-    <span class="nav-icon">◉</span>
-    <span class="nav-text">設定</span>
-  </button>
+<nav>
+  <button id="navToday" aria-current="page">✦ 今日</button>
+  <button id="navConst">◎ 星座</button>
+  <button id="navSettings">◉ 設定</button>
 </nav>
 
-<!-- Toast -->
-<div class="toast" id="toast"></div>
-
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script>
-'use strict';
-
-// ── Routine definitions (Phase 1 hardcoded) ────────────────────────────────────
-// Source: config/star_chart_routines.yaml
-// Fable 5 の Q6 指摘反映：宣言状態を撤廃・状態は全て観測イベントから生まれる
-// Week 1 は全項目「未観測」で開始・タップにより灯る
+"use strict";
+/* =====================================================================
+   第1層: 台帳（ROUTINES）
+   殿と将軍が確定した10項目。status フィールドは存在しない —
+   状態はここには住まない（原則3）。
+   ===================================================================== */
+const SCHEMA_VERSION = 1;
 const ROUTINES = [
-  { id: 'R001', name: '起床・ストレッチ', timeslot: '朝',    hour: 6,    status: 'active' },
-  { id: 'R002', name: '朝散歩',           timeslot: '朝',    hour: 6,    status: 'active' },
-  { id: 'R004', name: 'AI英会話',         timeslot: '朝',    hour: 7,    status: 'active' },
-  { id: 'R005', name: 'IGストーリー',     timeslot: '朝',    hour: 8,    status: 'active' },
-  { id: 'R006', name: '投資チェック',     timeslot: '朝',    hour: 9,    status: 'active' },
-  { id: 'R011', name: '日曜カフェ',       timeslot: '日曜朝', hour: 9,   status: 'active' },
-  { id: 'R012', name: 'Instagram制作',    timeslot: '柔軟',  hour: null, status: 'active' },
-  { id: 'R015', name: '英語振り返り',     timeslot: '夜',    hour: 17,   status: 'active' },
-  { id: 'R017', name: 'ワインノート',     timeslot: '夜',    hour: 19,   status: 'active' },
-  { id: 'R018', name: '読書・デトックス', timeslot: '夜',    hour: 22,   status: 'active' },
+  { id:"R001", name:"ストレッチ・姿勢",   axes:["健康体"],                timeslot:"朝",     hour:6,  rhythm:{per_week:5} },
+  { id:"R002", name:"朝散歩",             axes:["健康体","家族感性"],     timeslot:"朝",     hour:6,  rhythm:{per_week:5} },
+  { id:"R004", name:"AI英会話",           axes:["掛け算学習"],            timeslot:"朝",     hour:7,  rhythm:{per_week:5} },
+  { id:"R005", name:"IGストーリー",       axes:["独立準備"],              timeslot:"朝",     hour:8,  rhythm:{per_week:5} },
+  { id:"R006", name:"投資チェック",       axes:["独立準備"],              timeslot:"朝",     hour:9,  rhythm:{per_month:1} },
+  { id:"R011", name:"日曜カフェ戦略対話", axes:["仕組み資産"],            timeslot:"日曜朝", hour:9,  rhythm:{per_week:1},
+    purpose:"日曜朝カフェで殿と将軍の週次戦略対話" },
+  { id:"R012", name:"Instagram制作",      axes:["独立準備"],              timeslot:"柔軟",   hour:14, rhythm:{per_week:3} },
+  { id:"R015", name:"英語で振り返り",     axes:["掛け算学習"],            timeslot:"夜",     hour:17, rhythm:{per_week:3} },
+  { id:"R017", name:"ワインノート",       axes:["掛け算学習"],            timeslot:"夜",     hour:19, rhythm:{per_month:2},
+    rhythm_min_credit:1.0,   /* 心拍は 1.0（フルテイスティング）だけを数える */
+    half:{ credit:0.5, label:"追記" } },
+  { id:"R018", name:"読書・Dラボ・旅計画", axes:["掛け算学習","家族感性"], timeslot:"夜",     hour:22, rhythm:{per_week:5},
+    half:{ credit:0.5, label:"Dラボのみ" } },
 ];
 
-// Timeslot ordering for display
-const TIMESLOT_ORDER = [
-  { key: '朝',    label: '朝',      ids: ['R001','R002','R005','R006','R011'] },
-  { key: '夜',    label: '夜',      ids: ['R015','R017','R018'] },
-  { key: '柔軟',  label: 'いつでも', ids: ['R012'] },
-];
+/* 【殿ご決定・2026-07-05】輪郭だけの星は不採用。
+   理由: 独立後の昼間業務は実現時点で当たり前業務に変わるため、
+   今から未来永劫「星」として表示する必要はない。
+   星図の焦点は「殿が意志で選び直せる時間」——朝・夜・休日のみ */
+const FUTURE_HOURS = []; /* 空配列: 輪郭星表示なし */
 
-const STORAGE_KEY = 'star_chart_events';
-const TL_START = 6;
-const TL_END   = 22;
-const TL_SEGS  = TL_END - TL_START;  // 16
+/* =====================================================================
+   第2層: 純粋関数 — DOM に一切触れない。単体で検証可能。
+   ===================================================================== */
+const DAY_START_HOUR = 4;  /* 原則2: 1日は 04:00 に始まる。
+                              22:00 の読書が 00:15 に記録されても前日の夜の灯り */
 
-// ── Data helpers ───────────────────────────────────────────────────────────────
-function loadEvents() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-  catch (_) { return []; }
+function dayKey(ts){
+  const d = new Date(new Date(ts).getTime() - DAY_START_HOUR*3600*1000);
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function dayOfWeek(ts){ /* 04:00境界で見た曜日。0=日曜 */
+  return new Date(new Date(ts).getTime() - DAY_START_HOUR*3600*1000).getDay();
 }
 
-function saveEvents(arr) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(arr)); } catch (_) {}
-}
+/* 原則1: 追記専用ログ。イベント種別は3つ。
+   light   : 灯した     {type:'light', ts, routine_id, credit, source}
+   retract : 消した     {type:'retract', ts, routine_id}   … その日のlightを打ち消す
+   decision: 殿の決断   {type:'decision', ts, routine_id, decision:'休眠'|'廃止'|'変質'|'再点灯', new_purpose?}
+   削除APIは存在しない。 */
 
-function todayStr() {
-  return new Date().toDateString();
-}
-
-function getTodayEvents() {
-  const today = todayStr();
-  return loadEvents().filter(e => new Date(e.ts).toDateString() === today);
-}
-
-function getLitIds() {
-  const s = new Set();
-  getTodayEvents().forEach(e => { if (e.credit >= 1.0) s.add(e.routine_id); });
-  return s;
-}
-
-function getActiveRoutines() {
-  const isSunday = new Date().getDay() === 0;
-  return ROUTINES.filter(r => {
-    if (r.timeslot === '日曜朝' && !isSunday) return false;
-    return true;
-  });
-}
-
-// 微睡みは Phase 2 の心拍検知が実データから判定する
-// Week 1 は宣言状態を持たない・全項目 active
-function getSleepingRoutines() {
-  return [];
-}
-
-// ── Toggle ─────────────────────────────────────────────────────────────────────
-function toggleRoutine(routineId) {
-  const events = loadEvents();
-  const today = todayStr();
-  const hasLit = events.some(e =>
-    new Date(e.ts).toDateString() === today &&
-    e.routine_id === routineId &&
-    e.credit >= 1.0
+function effectiveLights(events){
+  const lights   = events.filter(e => e.type === "light");
+  const retracts = events.filter(e => e.type === "retract");
+  return lights.filter(l =>
+    !retracts.some(r => r.routine_id === l.routine_id && dayKey(r.ts) === dayKey(l.ts) && r.ts > l.ts)
   );
+}
 
-  if (hasLit) {
-    const filtered = events.filter(e => {
-      if (new Date(e.ts).toDateString() !== today) return true;
-      if (e.routine_id !== routineId) return true;
-      if (e.credit < 1.0) return true;
-      return false;
-    });
-    saveEvents(filtered);
-    showToast('取り消しました');
-  } else {
-    events.push({ ts: new Date().toISOString(), routine_id: routineId, credit: 1.0, source: 'manual' });
-    saveEvents(events);
-    showToast('✦ 点灯しました');
+/* その日の routine ごとの最良 credit（Map<id, credit>） */
+function creditsOn(events, key){
+  const m = new Map();
+  for(const e of effectiveLights(events)){
+    if(dayKey(e.ts) !== key) continue;
+    m.set(e.routine_id, Math.max(m.get(e.routine_id) || 0, e.credit));
   }
-  render();
+  return m;
 }
 
-// ── Render ─────────────────────────────────────────────────────────────────────
-function formatDate(d) {
-  const m   = d.getMonth() + 1;
-  const day = d.getDate();
-  const dow = ['日','月','火','水','木','金','土'][d.getDay()];
-  return `${m}月${day}日（${dow}）`;
+/* 殿の決断の畳み込み: 最後の decision が現在の宣言状態。
+   履歴＝年輪はこの配列そのもの（設計書 §5.2 が無料で手に入る） */
+function foldDecision(events, id){
+  const ds = events.filter(e => e.type === "decision" && e.routine_id === id);
+  return ds.length ? ds[ds.length-1] : null;
 }
 
-function renderHeader(litIds, active) {
-  document.getElementById('today-date').textContent = formatDate(new Date());
-  const litCount = active.filter(r => litIds.has(r.id)).length;
-  const total    = active.length;
-  const pct      = total > 0 ? Math.round(litCount / total * 100) : 0;
-  document.getElementById('lit-bar-fill').style.width = pct + '%';
-  document.getElementById('lit-bar-pct').textContent  = total > 0 ? pct + '%' : '—';
+/* 今日の分母に入るか（休眠・廃止は外れる。日曜朝は日曜のみ） */
+function applicable(routine, events, ts){
+  const d = foldDecision(events, routine.id);
+  if(d && (d.decision === "休眠" || d.decision === "廃止")) return false;
+  if(routine.timeslot === "日曜朝") return dayOfWeek(ts) === 0;
+  return true;
 }
 
-function renderTimeline(litIds) {
-  const bar = document.getElementById('timeline-bar');
-  bar.innerHTML = '';
+/* 今日の灯り率: Σ(best credit, 上限1.0) ÷ 今日の分母 */
+function lightRate(events, ts){
+  const key = dayKey(ts);
+  const credits = creditsOn(events, key);
+  const pool = ROUTINES.filter(r => applicable(r, events, ts));
+  if(pool.length === 0) return null;
+  const sum = pool.reduce((a,r) => a + Math.min(credits.get(r.id) || 0, 1.0), 0);
+  return sum / pool.length;
+}
 
-  const litHours = new Set();
+/* 心拍検知（Phase 2 の中核だが、純粋関数なので今日から同梱できる）
+   rhythm_min_credit 未満の灯りは鼓動と数えない — 体温はあっても鼓動が
+   止まっていれば微睡み。返り値: {state, silentDays, thresholdDays} */
+function heartbeat(routine, events, now){
+  const minCredit = routine.rhythm_min_credit || 0.5;
+  const beats = effectiveLights(events)
+    .filter(e => e.routine_id === routine.id && e.credit >= minCredit)
+    .map(e => new Date(e.ts).getTime());
+  const interval = routine.rhythm.per_week ? 7 / routine.rhythm.per_week
+                 : 30 / routine.rhythm.per_month;
+  const threshold = interval * 1.5;
+  if(beats.length === 0) return { state:"未着手", silentDays:null, thresholdDays:threshold };
+  const silent = (now - Math.max(...beats)) / 86400000;
+  return { state: silent > threshold ? "微睡み" : "点灯圏", silentDays:silent, thresholdDays:threshold };
+}
 
-  // Events with timestamps
-  getTodayEvents().forEach(e => {
-    if (e.credit >= 1.0) {
-      const h = new Date(e.ts).getHours();
-      if (h >= TL_START && h < TL_END) litHours.add(h);
-    }
-  });
+/* =====================================================================
+   第3層: 保存層（append-only）
+   ===================================================================== */
+const STORAGE_KEY = "star_chart_events_v1";
 
-  // Also mark expected hours of lit routines
-  ROUTINES.forEach(r => {
-    if (litIds.has(r.id) && r.hour !== null && r.hour >= TL_START && r.hour < TL_END) {
-      litHours.add(r.hour);
-    }
-  });
-
-  for (let h = TL_START; h < TL_END; h++) {
-    const seg = document.createElement('div');
-    seg.className = 'tl-seg' + (litHours.has(h) ? ' lit' : '');
-    bar.appendChild(seg);
+function loadEvents(){
+  try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch(e){ return []; }
+}
+function appendEvent(ev){          /* 追記する関数はあるが、消す関数は無い */
+  const events = loadEvents();
+  events.push(ev);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+  return events;
+}
+function mergeEvents(incoming){    /* 復元は置換ではなくマージ（和集合） */
+  const seen = new Set(loadEvents().map(sig));
+  let added = 0;
+  const events = loadEvents();
+  for(const e of incoming){
+    if(!e || !e.type || !e.ts) continue;
+    if(seen.has(sig(e))) continue;
+    events.push(e); seen.add(sig(e)); added++;
   }
+  events.sort((a,b) => a.ts < b.ts ? -1 : 1);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+  return added;
 }
+function sig(e){ return e.type + "|" + e.ts + "|" + (e.routine_id||"") + "|" + (e.credit||""); }
 
-function renderChips(litIds) {
-  const active  = getActiveRoutines();
-  const section = document.getElementById('chips-section');
-  section.innerHTML = '';
-
-  TIMESLOT_ORDER.forEach(group => {
-    const routinesInGroup = active.filter(r => group.ids.includes(r.id));
-    if (routinesInGroup.length === 0) return;
-
-    const wrapper = document.createElement('div');
-    wrapper.className = 'timeslot-group';
-
-    const lbl = document.createElement('div');
-    lbl.className = 'timeslot-label';
-    lbl.textContent = group.label;
-    wrapper.appendChild(lbl);
-
-    const grid = document.createElement('div');
-    grid.className = 'chips-grid';
-
-    routinesInGroup.forEach(r => {
-      const btn = document.createElement('button');
-      btn.className = 'chip' + (litIds.has(r.id) ? ' lit' : '');
-      btn.textContent = r.name;
-      btn.dataset.id  = r.id;
-      btn.addEventListener('click', () => toggleRoutine(r.id));
-      grid.appendChild(btn);
-    });
-
-    wrapper.appendChild(grid);
-    section.appendChild(wrapper);
+/* ---------------------------------------------------------------------
+   弧の幾何（純粋関数）: 1日 = 夜明けから夜へ渡る二次ベジェ。
+   hour 6..22 を t=0..1 に写像し、星を自分の時刻の席へ置く。
+   --------------------------------------------------------------------- */
+function bez(t, p0, p1, p2){
+  const u = 1 - t;
+  return [ u*u*p0[0] + 2*u*t*p1[0] + t*t*p2[0],
+           u*u*p0[1] + 2*u*t*p1[1] + t*t*p2[1] ];
+}
+function starStates(events, key){
+  const ts = new Date(key + "T12:00:00").getTime();
+  const credits = creditsOn(events, key);
+  const seen = {};
+  return ROUTINES.filter(r => applicable(r, events, ts)).map(r => {
+    let h = r.hour;                       /* 同時刻の星は弧に沿って半歩ずらす */
+    while(seen[h]) h += 0.5;
+    seen[h] = true;
+    return { hour:h, credit: credits.get(r.id) || 0,
+             dormant: heartbeat(r, events, Date.now()).state === "微睡み" };
   });
 }
-
-function renderSleeping() {
-  const sleeping = getSleepingRoutines();
-  document.getElementById('sleeping-count').textContent = sleeping.length;
-
-  const list = document.getElementById('sleeping-list');
-  list.innerHTML = '';
-  sleeping.forEach(r => {
-    const btn = document.createElement('button');
-    btn.className = 'chip sleeping';
-    btn.textContent = r.name;
-    list.appendChild(btn);
-  });
+function arcStar(x, y, r, credit, dormant){
+  if(credit >= 1) return '<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="#D4882A"/>';
+  if(credit > 0)  return '<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="#EFD9B8" stroke="#D4882A" stroke-width="0.6"/>';
+  if(dormant)     return '<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="#F3EDE2" stroke="#E5DCCB" stroke-width="0.6" opacity="0.45"/>';
+  return '<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="#F3EDE2" stroke="#CBBFAC" stroke-width="0.6"/>';
+}
+function arcSVG(states, o){
+  let s = '<svg viewBox="0 0 '+o.w+' '+o.h+'" xmlns="http://www.w3.org/2000/svg">';
+  if(o.horizon) s += '<line x1="'+(o.p0[0]-8)+'" y1="'+o.p0[1]+'" x2="'+(o.p2[0]+8)+'" y2="'+o.p2[1]+'" stroke="#E5DCCB" stroke-width="0.6"/>';
+  s += '<path d="M'+o.p0[0]+' '+o.p0[1]+' Q'+o.p1[0]+' '+o.p1[1]+' '+o.p2[0]+' '+o.p2[1]+'" fill="none" stroke="#D9CDB8" stroke-width="0.8"/>';
+  if(o.future) for(const fh of FUTURE_HOURS){
+    const q = bez((fh-6)/16, o.p0, o.p1, o.p2);
+    s += '<circle cx="'+q[0].toFixed(1)+'" cy="'+q[1].toFixed(1)+'" r="'+(o.r*0.8).toFixed(1)+'" fill="none" stroke="#CBBFAC" stroke-width="0.7" stroke-dasharray="2.4 2.4"/>';
+  }
+  for(const st of states){
+    const q = bez(Math.min(1, Math.max(0, (st.hour-6)/16)), o.p0, o.p1, o.p2);
+    s += arcStar(q[0].toFixed(1), q[1].toFixed(1), o.r, st.credit, st.dormant);
+  }
+  if(o.hourLabels) s += '<text x="'+o.p0[0]+'" y="'+(o.p0[1]+20)+'" text-anchor="middle" font-size="11" fill="#8A7A64">06</text>'
+                      + '<text x="'+o.p2[0]+'" y="'+(o.p2[1]+20)+'" text-anchor="middle" font-size="11" fill="#8A7A64">22</text>';
+  return s + '</svg>';
 }
 
-function render() {
-  const litIds = getLitIds();
-  const active = getActiveRoutines();
-  renderHeader(litIds, active);
-  renderTimeline(litIds);
-  renderChips(litIds);
-  renderSleeping();
+/* =====================================================================
+   第4層: 描画 — 状態を持たない。毎回、台帳と純粋関数から全再描画。
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const SLOT_ORDER = [["朝","朝"], ["夜","夜"], ["日曜朝","日曜朝"], ["柔軟","いつでも"]];
+
+function render(){
+  const now = Date.now();
+  const events = loadEvents();
+  const key = dayKey(now);
+  const credits = creditsOn(events, key);
+
+  /* 日付 */
+  const d = new Date(now - DAY_START_HOUR*3600*1000);
+  $("dateLine").textContent =
+    (d.getMonth()+1) + "月" + d.getDate() + "日（" + "日月火水木金土"[d.getDay()] + "）";
+
+  /* 灯り率 */
+  const rate = lightRate(events, now);
+  $("rateValue").textContent = (rate === null || credits.size === 0) ? "—" : Math.round(rate*100) + "%";
+  $("rateFill").style.width = (rate === null ? 0 : rate*100) + "%";
+
+  /* 日の弧 — 表示専用。入力は下のチップが受け持つ */
+  $("arcToday").innerHTML = arcSVG(starStates(events, key),
+    { w:360, h:186, p0:[22,148], p1:[180,26], p2:[338,148], r:7,
+      horizon:true, future:true, hourLabels:true });
+
+  /* 星座 — この7日の弧（灯った星だけが残る） */
+  let cells = "";
+  for(let i = 6; i >= 0; i--){
+    const k = dayKey(now - i*86400000);
+    const lit = starStates(events, k).filter(st => st.credit > 0);
+    const noonTs = new Date(k + "T12:00:00").getTime();
+    const dr = lightRate(events, noonTs);
+    cells += '<div class="day-cell">'
+      + arcSVG(lit, { w:46, h:36, p0:[4,28], p1:[23,5], p2:[42,28], r:2.2 })
+      + '<div class="day-label">' + "日月火水木金土"[new Date(noonTs).getDay()] + '</div>'
+      + '<div class="day-rate">' + (lit.length ? Math.round(dr*100) + "%" : "—") + '</div></div>';
+  }
+  $("weekArcs").innerHTML = cells;
+
+  /* チップ群 */
+  let html = "";
+  for(const [slot, label] of SLOT_ORDER){
+    const rs = ROUTINES.filter(r => r.timeslot === slot && applicable(r, events, now));
+    if(rs.length === 0) continue;
+    html += '<div class="group"><h2>' + label + '</h2><div class="chips">';
+    for(const r of rs){
+      const c = credits.get(r.id) || 0;
+      const hb = heartbeat(r, events, now);
+      const cls = "chip" + (c >= 1.0 ? "" : c ? " half-lit" : "") + (hb.state === "微睡み" && !c ? " dormant" : "");
+      html += '<button class="' + cls + '" data-id="' + r.id + '" aria-pressed="' + (c >= 1.0) + '">'
+            + '<span class="star"></span>' + r.name
+            + (r.half && c < 1.0 ? '<span class="sub" data-half="' + r.id + '">' + r.half.label + " ½</span>" : "")
+            + "</button>";
+    }
+    html += "</div></div>";
+  }
+  $("groups").innerHTML = html;
+
+  /* 微睡み（観測から導出 — 宣言ではない） */
+  const dormant = ROUTINES.filter(r => applicable(r, events, now) && heartbeat(r, events, now).state === "微睡み");
+  $("dormantCount").textContent = dormant.length;
+  $("dormantList").innerHTML = dormant.map(r => {
+    const hb = heartbeat(r, events, now);
+    return r.name + " — " + Math.floor(hb.silentDays) + "日眠っています";
+  }).join("<br>");
+
+  /* 設定メタ */
+  $("metaInfo").innerHTML =
+    "記録イベント数: " + events.length + "<br>"
+    + "1日の境界: 04:00（dayKey）／台帳: 追記専用<br>"
+    + "スキーマ: v" + SCHEMA_VERSION + "（v0.1 と互換・書き出し/マージで往来自由）<br>保存先: LocalStorage（Supabase 移行待ち）";
 }
 
-// ── Sleeping toggle ────────────────────────────────────────────────────────────
-document.getElementById('sleeping-toggle').addEventListener('click', () => {
-  const list  = document.getElementById('sleeping-list');
-  const arrow = document.getElementById('sleeping-arrow');
-  const open  = list.classList.toggle('open');
-  arrow.textContent = open ? '‹' : '›';
+/* =====================================================================
+   第5層: 結線
+   ===================================================================== */
+document.addEventListener("click", ev => {
+  const half = ev.target.closest("[data-half]");
+  const chip = ev.target.closest(".chip");
+
+  if(half){ /* 半灯（追記 0.5）— フル点灯とは別の鼓動として刻む */
+    ev.stopPropagation();
+    appendEvent({ type:"light", ts:new Date().toISOString(), routine_id:half.dataset.half, credit:0.5, source:"manual" });
+    render(); toast("½ 追記を記録しました"); return;
+  }
+  if(chip){
+    const id = chip.dataset.id;
+    const lit = (creditsOn(loadEvents(), dayKey(Date.now())).get(id) || 0) >= 1.0;
+    if(lit){ /* 消灯も観測 — 削除ではなく retract を追記（原則1） */
+      appendEvent({ type:"retract", ts:new Date().toISOString(), routine_id:id });
+      render(); toast("消灯しました");
+    }else{
+      appendEvent({ type:"light", ts:new Date().toISOString(), routine_id:id, credit:1.0, source:"manual" });
+      render();
+      const c = document.querySelector('.chip[data-id="' + id + '"]');
+      if(c) c.classList.add("ignite"); /* 唯一の贅沢 */
+      toast("灯りました");
+    }
+  }
 });
 
-// ── Toast ──────────────────────────────────────────────────────────────────────
-let _toastTimer = null;
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(_toastTimer);
-  // メッセージ長により時間調整（20字以下: 1.8s / 長文: 4s）
-  const duration = msg.length > 20 ? 4000 : 1800;
-  _toastTimer = setTimeout(() => t.classList.remove('show'), duration);
-}
-window.showToast = showToast;
+$("dormantToggle").addEventListener("click", () => {
+  const list = $("dormantList");
+  const open = list.hidden;
+  list.hidden = !open;
+  $("dormantToggle").setAttribute("aria-expanded", String(open));
+});
 
-// ── Init ───────────────────────────────────────────────────────────────────────
+/* ナビ */
+const VIEWS = { today:"view-today", const:"view-const", settings:"view-settings" };
+$("navToday").addEventListener("click", () => switchView("today"));
+$("navConst").addEventListener("click", () => switchView("const"));
+$("navSettings").addEventListener("click", () => switchView("settings"));
+function switchView(v){
+  for(const [name, id] of Object.entries(VIEWS)){
+    document.getElementById(id).classList.toggle("active", name === v);
+    const btn = $("nav" + name[0].toUpperCase() + name.slice(1));
+    if(name === v) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
+  }
+}
+
+/* 書き出し / 読み込み（マージ） */
+$("exportBtn").addEventListener("click", async () => {
+  const payload = { app:"star-chart", version:SCHEMA_VERSION, exported_at:new Date().toISOString(), events:loadEvents() };
+  const name = "star-chart-backup-" + dayKey(Date.now()) + ".json";
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:"application/json" });
+  const file = new File([blob], name, { type:"application/json" });
+  if(navigator.canShare && navigator.canShare({ files:[file] })){
+    try{ await navigator.share({ files:[file], title:"星図の記録" }); return; }catch(e){ /* キャンセル時はDLへ */ }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  URL.revokeObjectURL(a.href);
+  toast("記録を書き出しました");
+});
+$("importBtn").addEventListener("click", () => $("importFile").click());
+$("importFile").addEventListener("change", async ev => {
+  const f = ev.target.files[0]; if(!f) return;
+  try{
+    const data = JSON.parse(await f.text());
+    const added = mergeEvents(Array.isArray(data) ? data : (data.events || []));
+    render(); toast(added + " 件の灯りを取り込みました（重複は除外）");
+  }catch(e){ toast("読み込めませんでした。JSONを確認してください"); }
+  ev.target.value = "";
+});
+
+/* Toast */
+let toastTimer;
+function toast(msg){
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), msg.length > 20 ? 4000 : 1800);
+}
+
+/* 日付が変わったら（04:00境界）自動で今日画面を新しくする */
+let lastKey = dayKey(Date.now());
+setInterval(() => {
+  const k = dayKey(Date.now());
+  if(k !== lastKey){ lastKey = k; render(); }
+}, 60000);
+document.addEventListener("visibilitychange", () => { if(!document.hidden) render(); });
+
 render();
 
-// ── Service Worker ─────────────────────────────────────────────────────────────
-if ('serviceWorker' in navigator) {
+/* Service Worker 登録 — オフライン対応・ホーム画面追加 */
+if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js')
       .then(reg => console.log('SW registered', reg.scope))
