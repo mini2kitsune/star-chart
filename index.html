@@ -150,12 +150,44 @@
     transition:opacity .3s ease, transform .3s ease; max-width:86%;
   }
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* ============ 認証ビュー ============ */
+  .auth-wrap{ padding:60px 24px; text-align:center; }
+  .auth-wrap .app-name{ font-family:var(--serif); font-size:20px; letter-spacing:.35em; color:var(--ink); margin-bottom:8px; }
+  .auth-wrap .app-sub{ font-family:var(--serif); font-size:12px; color:var(--ink-soft); letter-spacing:.2em; margin-bottom:32px; }
+  .auth-wrap input{
+    display:block; width:100%; font:inherit; color:var(--ink);
+    background:var(--paper); border:1px solid var(--line); border-radius:12px;
+    padding:12px 14px; margin-bottom:12px; -webkit-appearance:none;
+  }
+  .auth-wrap input:focus{ outline:none; border-color:var(--ink-soft); }
+  .auth-wrap .btn{
+    display:block; width:100%; text-align:center; background:var(--ink); color:var(--ivory);
+    border:none; border-radius:12px; padding:13px; font-size:14px; margin-bottom:12px;
+  }
+  .auth-wrap .btn.quiet{ background:var(--ivory); color:var(--ink); border:1px solid var(--line); }
+  .auth-wrap .auth-msg{ font-size:12px; color:var(--ink-soft); margin-top:16px; min-height:18px; }
+  .sync-badge{ font-size:11px; color:var(--ink-soft); letter-spacing:.1em; margin-left:6px; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 
+<!-- ========== 認証画面（未ログイン時のみ表示） ========== -->
+<div class="auth-wrap" id="authView" style="display:none;">
+  <div class="app-name">星　図</div>
+  <div class="app-sub">北極星への灯り</div>
+  <input type="email" id="authEmail" placeholder="メールアドレス" autocomplete="email">
+  <input type="password" id="authPassword" placeholder="パスワード（8文字以上）" autocomplete="current-password">
+  <button class="btn" id="authSignIn">ログイン</button>
+  <button class="btn quiet" id="authSignUp">新規登録</button>
+  <div class="auth-msg" id="authMsg"></div>
+</div>
+
+<!-- ========== アプリ本体（ログイン後表示） ========== -->
+<div id="appMain" style="display:none;">
 <header>
-  <div class="app-title">星　図</div>
+  <div class="app-title">星　図<span class="sync-badge" id="syncBadge"></span></div>
   <div class="date-line" id="dateLine">—</div>
   <div class="rate-row">
     <span class="rate-label">今日の灯り</span>
@@ -202,6 +234,7 @@
   <button id="navConst">◎ 星座</button>
   <button id="navSettings">◉ 設定</button>
 </nav>
+</div><!-- /#appMain -->
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script>
@@ -315,9 +348,15 @@ function heartbeat(routine, events, now){
 }
 
 /* =====================================================================
-   第3層: 保存層（append-only）
+   第3層: 保存層（append-only）+ Supabase 同期
    ===================================================================== */
 const STORAGE_KEY = "star_chart_events_v1";
+
+// Supabase 設定（既存のワインノート・在庫管理と同じプロジェクト）
+const SUPABASE_URL = 'https://tglxsjwvkezoxccvbqfy.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_VbmYrasMK9ieIv9e8KiBJA_Eh1BuhN2';
+let sbClient = null;
+let currentUser = null;
 
 function loadEvents(){
   try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
@@ -327,6 +366,7 @@ function appendEvent(ev){          /* 追記する関数はあるが、消す関
   const events = loadEvents();
   events.push(ev);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+  syncEventToSupabase(ev); /* Supabase にも保存（fire-and-forget） */
   return events;
 }
 function mergeEvents(incoming){    /* 復元は置換ではなくマージ（和集合） */
@@ -343,6 +383,56 @@ function mergeEvents(incoming){    /* 復元は置換ではなくマージ（和
   return added;
 }
 function sig(e){ return e.type + "|" + e.ts + "|" + (e.routine_id||"") + "|" + (e.credit||""); }
+
+/* ---------------------------------------------------------------------
+   Supabase 同期関数（追記専用モデル維持・fire-and-forget）
+   --------------------------------------------------------------------- */
+async function syncEventToSupabase(ev){
+  if(!sbClient || !currentUser) return; // 未ログイン時はスキップ（LocalStorage のみ）
+  try{
+    const row = {
+      user_id: currentUser.id,
+      ts: ev.ts,
+      type: ev.type,
+      routine_id: ev.routine_id || null,
+      credit: ev.credit || null,
+      source: ev.source || null,
+      decision: ev.decision || null,
+      new_purpose: ev.new_purpose || null,
+    };
+    const { error } = await sbClient.from('star_chart_events').insert(row);
+    if(error){ console.warn('SB insert error', error); updateSyncBadge('△'); }
+    else{ updateSyncBadge('◉'); }
+  }catch(e){ console.warn('SB sync failed', e); updateSyncBadge('△'); }
+}
+
+async function loadFromSupabase(){
+  if(!sbClient || !currentUser) return 0;
+  try{
+    const { data, error } = await sbClient
+      .from('star_chart_events')
+      .select('*')
+      .order('ts', { ascending: true });
+    if(error){ console.warn('SB load error', error); return 0; }
+    // Supabase → 内部形式に変換して merge
+    const events = (data || []).map(row => {
+      const e = { type: row.type, ts: row.ts, routine_id: row.routine_id };
+      if(row.credit !== null) e.credit = Number(row.credit);
+      if(row.source) e.source = row.source;
+      if(row.decision) e.decision = row.decision;
+      if(row.new_purpose) e.new_purpose = row.new_purpose;
+      return e;
+    });
+    return mergeEvents(events);
+  }catch(e){ console.warn('SB load failed', e); return 0; }
+}
+
+function updateSyncBadge(mark){
+  const el = document.getElementById('syncBadge');
+  if(el) el.textContent = mark;
+  clearTimeout(updateSyncBadge._t);
+  updateSyncBadge._t = setTimeout(() => { if(el) el.textContent = ''; }, 2000);
+}
 
 /* ---------------------------------------------------------------------
    弧の幾何（純粋関数）: 1日 = 夜明けから夜へ渡る二次ベジェ。
@@ -554,7 +644,72 @@ setInterval(() => {
 }, 60000);
 document.addEventListener("visibilitychange", () => { if(!document.hidden) render(); });
 
-render();
+/* =====================================================================
+   認証・起動フロー
+   ===================================================================== */
+function showAuthView(msg){
+  document.getElementById('authView').style.display = 'block';
+  document.getElementById('appMain').style.display = 'none';
+  if(msg) document.getElementById('authMsg').textContent = msg;
+}
+function showAppView(){
+  document.getElementById('authView').style.display = 'none';
+  document.getElementById('appMain').style.display = 'block';
+  render();
+}
+
+async function initAuth(){
+  if(!window.supabase){
+    // SDK 未ロード時は LocalStorage のみで動く（オフライン耐性）
+    showAppView();
+    return;
+  }
+  sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const { data: { session } } = await sbClient.auth.getSession();
+  if(session && session.user){
+    currentUser = session.user;
+    showAppView();
+    const merged = await loadFromSupabase();
+    if(merged > 0){ render(); toast(merged + '件の履歴を同期しました'); }
+  }else{
+    showAuthView();
+  }
+  sbClient.auth.onAuthStateChange(async (event, session) => {
+    if(session && session.user){
+      currentUser = session.user;
+      showAppView();
+      const merged = await loadFromSupabase();
+      if(merged > 0){ render(); }
+    }else{
+      currentUser = null;
+      showAuthView();
+    }
+  });
+}
+
+// 認証ボタン
+document.getElementById('authSignIn').addEventListener('click', async () => {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if(!email || !password){ showAuthView('メールとパスワードを入力してくだされ'); return; }
+  try{
+    const { error } = await sbClient.auth.signInWithPassword({ email, password });
+    if(error) showAuthView('ログイン失敗: ' + error.message);
+  }catch(e){ showAuthView('通信エラー: ' + e.message); }
+});
+document.getElementById('authSignUp').addEventListener('click', async () => {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if(!email || !password){ showAuthView('メールとパスワードを入力してくだされ'); return; }
+  if(password.length < 8){ showAuthView('パスワードは8文字以上でお願いします'); return; }
+  try{
+    const { error } = await sbClient.auth.signUp({ email, password });
+    if(error) showAuthView('登録失敗: ' + error.message);
+    else showAuthView('登録完了！ログインしてくだされ');
+  }catch(e){ showAuthView('通信エラー: ' + e.message); }
+});
+
+initAuth();
 
 /* Service Worker 登録 — オフライン対応・ホーム画面追加 */
 if('serviceWorker' in navigator){
