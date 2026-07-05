@@ -177,13 +177,26 @@
 <div class="auth-wrap" id="authView" style="display:none;">
   <div class="app-name">星　図</div>
   <div class="app-sub">北極星への灯り</div>
-  <input type="email" id="authEmail" placeholder="メールアドレス" autocomplete="email" autocapitalize="off" autocorrect="off">
-  <button type="button" class="btn" id="authMagicLink">メールでログインリンクを受け取る</button>
-  <div style="margin:16px 0 12px;font-size:11px;color:#B0A48F;letter-spacing:.1em">─ または ─</div>
-  <input type="password" id="authPassword" placeholder="パスワード（既に設定済みの方）" autocomplete="current-password">
-  <button type="button" class="btn quiet" id="authSignIn">パスワードでログイン</button>
+
+  <!-- ステップ1: メール入力 -->
+  <div id="step1">
+    <input type="email" id="authEmail" placeholder="メールアドレス" autocomplete="email" autocapitalize="off" autocorrect="off">
+    <button type="button" class="btn" id="authSendCode">6桁コードをメールで受け取る</button>
+  </div>
+
+  <!-- ステップ2: コード入力（メール送信後に表示） -->
+  <div id="step2" style="display:none;">
+    <div style="font-size:12px;color:#8A7A64;margin-bottom:12px;line-height:1.6;">
+      <span id="sentToEmail"></span> にメールを送りました。<br>
+      6桁のコードを入力してくだされ。
+    </div>
+    <input type="text" id="authCode" placeholder="6桁のコード" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" style="text-align:center;letter-spacing:.5em;font-size:20px;">
+    <button type="button" class="btn" id="authVerifyCode">確認して星図に入る</button>
+    <button type="button" class="btn quiet" id="authBackToEmail">メールアドレスを変える</button>
+  </div>
+
   <div class="auth-msg" id="authMsg"></div>
-  <div style="margin-top:24px;font-size:10px;color:#B0A48F;letter-spacing:.1em">v0.4 · 2026-07-06 マジックリンク対応</div>
+  <div style="margin-top:24px;font-size:10px;color:#B0A48F;letter-spacing:.1em">v0.5 · 2026-07-06 6桁コード方式</div>
 </div>
 
 <!-- ========== アプリ本体（ログイン後表示） ========== -->
@@ -652,6 +665,14 @@ document.addEventListener("visibilitychange", () => { if(!document.hidden) rende
 function showAuthView(msg){
   document.getElementById('authView').style.display = 'block';
   document.getElementById('appMain').style.display = 'none';
+  // step1 に戻す（コード送信後の状態を維持したくないため）
+  const step2 = document.getElementById('step2');
+  if(step2 && step2.style.display === 'block'){
+    // step2 中は状態を保つ（コード入力中に再呼び出しされた場合）
+  }else{
+    const step1 = document.getElementById('step1');
+    if(step1) step1.style.display = 'block';
+  }
   if(msg) document.getElementById('authMsg').textContent = msg;
 }
 function showAppView(){
@@ -669,8 +690,17 @@ async function initAuth(){
     return;
   }
   try{
-    sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    console.log('Supabase client created');
+    // PWA でセッション永続化を明示指定（iOS Safari PWA 対策）
+    sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,   // URLからのセッション検出は使わない（6桁コード方式）
+        storage: window.localStorage,
+        storageKey: 'star-chart-auth',
+      }
+    });
+    console.log('Supabase client created (with explicit persistence)');
     const { data: { session } } = await sbClient.auth.getSession();
     if(session && session.user){
       currentUser = session.user;
@@ -698,65 +728,91 @@ async function initAuth(){
   }
 }
 
-// 認証ボタン
-async function handleMagicLink(){
-  console.log('handleMagicLink called');
-  if(!sbClient){ showAuthView('通信の準備が整っていません。\n少し待ってから再度お試しくだされ。'); return; }
+// 6桁コード認証
+let currentAuthEmail = '';
+
+function showStep1(){
+  document.getElementById('step1').style.display = 'block';
+  document.getElementById('step2').style.display = 'none';
+  document.getElementById('authMsg').textContent = '';
+}
+function showStep2(email){
+  currentAuthEmail = email;
+  document.getElementById('sentToEmail').textContent = email;
+  document.getElementById('step1').style.display = 'none';
+  document.getElementById('step2').style.display = 'block';
+  document.getElementById('authCode').value = '';
+  document.getElementById('authCode').focus();
+}
+
+async function handleSendCode(){
+  console.log('handleSendCode called');
+  if(!sbClient){ document.getElementById('authMsg').textContent = '通信の準備が整っていません。\n少し待ってから再度お試しくだされ。'; return; }
   const email = document.getElementById('authEmail').value.trim();
-  if(!email){ showAuthView('メールアドレスを入力してくだされ'); return; }
-  if(!/^.+@.+\..+$/.test(email)){ showAuthView('メールアドレスの形式が正しくないようでござる'); return; }
-  showAuthView('リンクを送信中…');
+  if(!email){ document.getElementById('authMsg').textContent = 'メールアドレスを入力してくだされ'; return; }
+  if(!/^.+@.+\..+$/.test(email)){ document.getElementById('authMsg').textContent = 'メールアドレスの形式が正しくないようでござる'; return; }
+  document.getElementById('authMsg').textContent = 'コードを送信中…';
   try{
     const { data, error } = await sbClient.auth.signInWithOtp({
       email: email,
       options: {
-        emailRedirectTo: 'https://mini2kitsune.github.io/star-chart/'
+        shouldCreateUser: true,
       }
     });
     if(error){
-      console.error('magicLink error:', error);
-      let msg = error.message || 'リンク送信に失敗しました';
+      console.error('sendCode error:', error);
+      let msg = error.message || 'コード送信に失敗しました';
       if(/rate limit/i.test(msg)) msg = '試行回数が多すぎます。1分待って再試行してくだされ。';
       else if(/invalid/i.test(msg)) msg = 'メールアドレスが不正のようでござる。ご確認を。';
-      showAuthView('送信失敗:\n' + msg);
+      document.getElementById('authMsg').textContent = '送信失敗:\n' + msg;
     }else{
-      console.log('magicLink sent', data);
-      showAuthView('ログインリンクをメールでお送りしました。\n\n受信箱をご確認いただき、\n「Confirm your email」または\n「星図にログイン」のリンクをタップしてくだされ。\n\n（迷惑メールフォルダも念のためご確認を）');
+      console.log('code sent', data);
+      showStep2(email);
     }
   }catch(e){
-    console.error('magicLink exception:', e);
-    showAuthView('通信エラー:\n' + e.message);
+    console.error('sendCode exception:', e);
+    document.getElementById('authMsg').textContent = '通信エラー:\n' + e.message;
   }
 }
 
-async function handleSignIn(){
-  console.log('handleSignIn called');
-  if(!sbClient){ showAuthView('通信の準備が整っていません。\n少し待ってから再度お試しくだされ。'); return; }
-  const email = document.getElementById('authEmail').value.trim();
-  const password = document.getElementById('authPassword').value;
-  if(!email || !password){ showAuthView('メールとパスワードを入力してくだされ'); return; }
-  showAuthView('ログイン中…');
+async function handleVerifyCode(){
+  console.log('handleVerifyCode called');
+  if(!sbClient){ document.getElementById('authMsg').textContent = '通信の準備が整っていません。'; return; }
+  const token = document.getElementById('authCode').value.trim();
+  if(!token || token.length !== 6){ document.getElementById('authMsg').textContent = '6桁のコードを入力してくだされ'; return; }
+  document.getElementById('authMsg').textContent = '確認中…';
   try{
-    const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+    const { data, error } = await sbClient.auth.verifyOtp({
+      email: currentAuthEmail,
+      token: token,
+      type: 'email',
+    });
     if(error){
-      console.error('signIn error:', error);
-      let msg = error.message || 'ログインできませんでした';
-      if(/Invalid login credentials/i.test(msg)) msg = 'メールアドレスまたはパスワードが違います。\nパスワード未設定の場合は上の「メールでログインリンクを受け取る」をご利用くだされ。';
-      else if(/Email not confirmed/i.test(msg)) msg = 'メール確認が必要です。受信箱を確認してください。';
-      else if(/rate limit/i.test(msg)) msg = '試行回数が多すぎます。5-10分待って再試行してくだされ。';
-      showAuthView('ログイン失敗:\n' + msg);
+      console.error('verifyCode error:', error);
+      let msg = error.message || 'コードが正しくありません';
+      if(/expired/i.test(msg)) msg = 'コードの有効期限が切れました。\n「メールアドレスを変える」から再送してくだされ。';
+      else if(/invalid/i.test(msg)) msg = 'コードが違うようでござる。\nメールをよくご確認くだされ。';
+      document.getElementById('authMsg').textContent = '確認失敗:\n' + msg;
     }else{
-      console.log('signIn success', data);
+      console.log('verifyCode success', data);
+      document.getElementById('authMsg').textContent = 'ログイン成功！';
+      // onAuthStateChange が発火して showAppView に遷移する
     }
   }catch(e){
-    console.error('signIn exception:', e);
-    showAuthView('通信エラー:\n' + e.message);
+    console.error('verifyCode exception:', e);
+    document.getElementById('authMsg').textContent = '通信エラー:\n' + e.message;
   }
 }
 
-// クリック・タッチ両対応
-document.getElementById('authMagicLink').addEventListener('click', handleMagicLink);
-document.getElementById('authSignIn').addEventListener('click', handleSignIn);
+// クリックハンドラ
+document.getElementById('authSendCode').addEventListener('click', handleSendCode);
+document.getElementById('authVerifyCode').addEventListener('click', handleVerifyCode);
+document.getElementById('authBackToEmail').addEventListener('click', showStep1);
+
+// コード入力欄で Enter キーで確認
+document.getElementById('authCode').addEventListener('keypress', (e) => {
+  if(e.key === 'Enter'){ e.preventDefault(); handleVerifyCode(); }
+});
 
 initAuth();
 

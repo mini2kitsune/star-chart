@@ -1,4 +1,4 @@
-const CACHE_NAME = 'star-chart-v04-magic-link';
+const CACHE_NAME = 'star-chart-v05-otp-code';
 const STATIC_ASSETS = [
   '/star-chart/',
   '/star-chart/index.html',
