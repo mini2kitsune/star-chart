@@ -166,7 +166,7 @@
     border:none; border-radius:12px; padding:13px; font-size:14px; margin-bottom:12px;
   }
   .auth-wrap .btn.quiet{ background:var(--ivory); color:var(--ink); border:1px solid var(--line); }
-  .auth-wrap .auth-msg{ font-size:12px; color:var(--ink-soft); margin-top:16px; min-height:18px; }
+  .auth-wrap .auth-msg{ font-size:12px; color:var(--ink-soft); margin-top:16px; min-height:18px; word-break:break-word; line-height:1.6; white-space:pre-wrap; }
   .sync-badge{ font-size:11px; color:var(--ink-soft); letter-spacing:.1em; margin-left:6px; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -693,9 +693,22 @@ document.getElementById('authSignIn').addEventListener('click', async () => {
   const password = document.getElementById('authPassword').value;
   if(!email || !password){ showAuthView('メールとパスワードを入力してくだされ'); return; }
   try{
-    const { error } = await sbClient.auth.signInWithPassword({ email, password });
-    if(error) showAuthView('ログイン失敗: ' + error.message);
-  }catch(e){ showAuthView('通信エラー: ' + e.message); }
+    const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+    if(error){
+      console.error('signIn error:', error);
+      // ユーザーフレンドリーな翻訳
+      let msg = error.message || 'ログインできませんでした';
+      if(/Invalid login credentials/i.test(msg)) msg = 'メールアドレスまたはパスワードが違います。\n新規登録が済んでいない場合は「新規登録」ボタンを。';
+      else if(/Email not confirmed/i.test(msg)) msg = 'メール確認が必要です。受信箱を確認してください。';
+      else if(/rate limit/i.test(msg)) msg = '試行回数が多すぎます。5-10分待って再試行してくだされ。';
+      showAuthView('ログイン失敗:\n' + msg);
+    }else{
+      console.log('signIn success', data);
+    }
+  }catch(e){
+    console.error('signIn exception:', e);
+    showAuthView('通信エラー:\n' + e.message);
+  }
 });
 document.getElementById('authSignUp').addEventListener('click', async () => {
   const email = document.getElementById('authEmail').value.trim();
@@ -703,10 +716,25 @@ document.getElementById('authSignUp').addEventListener('click', async () => {
   if(!email || !password){ showAuthView('メールとパスワードを入力してくだされ'); return; }
   if(password.length < 8){ showAuthView('パスワードは8文字以上でお願いします'); return; }
   try{
-    const { error } = await sbClient.auth.signUp({ email, password });
-    if(error) showAuthView('登録失敗: ' + error.message);
-    else showAuthView('登録完了！ログインしてくだされ');
-  }catch(e){ showAuthView('通信エラー: ' + e.message); }
+    const { data, error } = await sbClient.auth.signUp({ email, password });
+    if(error){
+      console.error('signUp error:', error);
+      let msg = error.message || '登録できませんでした';
+      if(/already registered|already been registered|User already/i.test(msg)) msg = 'このメールは既に登録済み。\n「ログイン」ボタンから入ってくだされ。';
+      showAuthView('登録失敗:\n' + msg);
+    }else{
+      console.log('signUp success', data);
+      // autoconfirm ON なら data.session が返る・そのままログイン状態になる
+      if(data && data.session){
+        showAuthView('登録完了！ログイン中…');
+      }else{
+        showAuthView('登録完了！\nそのまま「ログイン」ボタンを押してくだされ。');
+      }
+    }
+  }catch(e){
+    console.error('signUp exception:', e);
+    showAuthView('通信エラー:\n' + e.message);
+  }
 });
 
 initAuth();
