@@ -1,4 +1,4 @@
-const CACHE_NAME = 'star-chart-v2-fable5';
+const CACHE_NAME = 'star-chart-v2-fable5-fox-icon';
 const STATIC_ASSETS = [
   '/star-chart/',
   '/star-chart/index.html',
