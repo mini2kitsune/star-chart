@@ -1,0 +1,22 @@
+{
+  "name": "星図 — 北極星への灯り",
+  "short_name": "星図",
+  "description": "理想の1日を星として灯す観測所",
+  "start_url": "/star-chart/",
+  "scope": "/star-chart/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#FAF6EF",
+  "background_color": "#FAF6EF",
+  "lang": "ja",
+  "icons": [
+    { "src": "icons/icon-72.png",  "sizes": "72x72",   "type": "image/png" },
+    { "src": "icons/icon-96.png",  "sizes": "96x96",   "type": "image/png" },
+    { "src": "icons/icon-128.png", "sizes": "128x128", "type": "image/png" },
+    { "src": "icons/icon-144.png", "sizes": "144x144", "type": "image/png" },
+    { "src": "icons/icon-152.png", "sizes": "152x152", "type": "image/png" },
+    { "src": "icons/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

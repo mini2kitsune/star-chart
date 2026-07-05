@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>星図 — 北極星への灯り</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#FAF6EF">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="星図">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;500&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+/* === Base === */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --ivory:      #FAF6EF;
+  --amber:      #D4882A;
+  --amber-bg:   #FDF3E3;
+  --ink:        #3C2F20;
+  --ink-soft:   #6B5B4B;
+  --ink-mute:   #9A8C7C;
+  --hair:       #E7DECB;
+  --hair-light: #F0EAE0;
+  --sans:   'Noto Sans JP', system-ui, sans-serif;
+  --serif:  'Noto Serif JP', 'YuMincho', 'Hiragino Mincho ProN', serif;
+}
+
+html, body {
+  background: var(--ivory);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  max-width: 430px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 72px;
+}
+
+/* === Header === */
+.header {
+  padding: 20px 20px 14px;
+  border-bottom: 1px solid var(--hair);
+}
+
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.app-name {
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 400;
+  color: var(--ink);
+  letter-spacing: 0.06em;
+}
+
+.today-date {
+  font-size: 12px;
+  color: var(--ink-mute);
+  font-weight: 300;
+}
+
+.lit-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lit-bar-label {
+  font-size: 11px;
+  color: var(--ink-mute);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lit-bar-track {
+  flex: 1;
+  height: 4px;
+  background: var(--hair);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.lit-bar-fill {
+  height: 100%;
+  background: var(--amber);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.lit-bar-pct {
+  font-size: 11px;
+  color: var(--amber);
+  font-weight: 500;
+  white-space: nowrap;
+  min-width: 28px;
+  text-align: right;
+}
+
+/* === Timeline === */
+.timeline-section {
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--hair-light);
+}
+
+.timeline-bar {
+  display: flex;
+  gap: 2px;
+  height: 16px;
+  margin-bottom: 4px;
+}
+
+.tl-seg {
+  flex: 1;
+  border-radius: 2px;
+  background: var(--hair-light);
+  transition: background 0.3s ease;
+}
+
+.tl-seg.lit {
+  background: var(--amber);
+}
+
+.timeline-hours {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--ink-mute);
+  padding: 0 1px;
+  letter-spacing: 0.02em;
+}
+
+/* === Chips Section === */
+.chips-section {
+  padding: 16px 20px;
+  flex: 1;
+}
+
+.timeslot-group {
+  margin-bottom: 18px;
+}
+
+.timeslot-label {
+  font-size: 10px;
+  color: var(--ink-mute);
+  letter-spacing: 0.12em;
+  margin-bottom: 8px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.chips-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1.5px solid var(--hair);
+  border-radius: 20px;
+  background: var(--ivory);
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  line-height: 1;
+}
+
+.chip:active {
+  transform: scale(0.96);
+}
+
+.chip.lit {
+  background: var(--amber-bg);
+  border-color: var(--amber);
+  color: var(--amber);
+  font-weight: 500;
+}
+
+.chip.lit::before {
+  content: '✦ ';
+  font-size: 9px;
+  vertical-align: middle;
+}
+
+/* === Sleeping Stars === */
+.sleeping-section {
+  padding: 0 20px 16px;
+}
+
+.sleeping-divider {
+  height: 1px;
+  background: var(--hair);
+  margin-bottom: 10px;
+}
+
+.sleeping-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-mute);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 300;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sleeping-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-mute);
+  font-size: 10px;
+  opacity: 0.65;
+  flex-shrink: 0;
+}
+
+.sleeping-arrow {
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.5;
+}
+
+.sleeping-list {
+  display: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sleeping-list.open {
+  display: flex;
+}
+
+.chip.sleeping {
+  opacity: 0.32;
+  border-style: dashed;
+  cursor: default;
+  pointer-events: none;
+  font-size: 12px;
+}
+
+/* === Nav Bar === */
+.nav-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--ivory);
+  border-top: 1px solid var(--hair);
+  display: flex;
+  height: 62px;
+  z-index: 100;
+  max-width: 430px;
+  margin: 0 auto;
+  right: max(0px, calc(50% - 215px));
+  left: max(0px, calc(50% - 215px));
+}
+
+.nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  gap: 3px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nav-icon {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink-mute);
+}
+
+.nav-text {
+  font-family: var(--sans);
+  font-size: 10px;
+  color: var(--ink-mute);
+  font-weight: 300;
+}
+
+.nav-item.active .nav-icon,
+.nav-item.active .nav-text {
+  color: var(--amber);
+}
+
+.nav-item.active .nav-text {
+  font-weight: 500;
+}
+
+/* === Toast === */
+.toast {
+  position: fixed;
+  bottom: 78px;
+  left: 50%;
+  transform: translateX(-50%) translateY(6px);
+  background: rgba(60, 47, 32, 0.88);
+  color: var(--ivory);
+  padding: 8px 18px;
+  border-radius: 20px;
+  font-size: 12px;
+  opacity: 0;
+  transition: all 0.22s ease;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 200;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-top">
+      <span class="app-name">星図</span>
+      <span class="today-date" id="today-date"></span>
+    </div>
+    <div class="lit-bar-row">
+      <span class="lit-bar-label">今日の灯り</span>
+      <div class="lit-bar-track">
+        <div class="lit-bar-fill" id="lit-bar-fill" style="width:0%"></div>
+      </div>
+      <span class="lit-bar-pct" id="lit-bar-pct">—</span>
+    </div>
+  </header>
+
+  <!-- Timeline -->
+  <section class="timeline-section">
+    <div class="timeline-bar" id="timeline-bar"></div>
+    <div class="timeline-hours">
+      <span>06</span><span>10</span><span>14</span><span>18</span><span>22</span>
+    </div>
+  </section>
+
+  <!-- Chips -->
+  <section class="chips-section" id="chips-section"></section>
+
+  <!-- Sleeping Stars -->
+  <section class="sleeping-section">
+    <div class="sleeping-divider"></div>
+    <button class="sleeping-toggle" id="sleeping-toggle">
+      <span>眠っている星</span>
+      <span class="sleeping-count" id="sleeping-count">2</span>
+      <span class="sleeping-arrow" id="sleeping-arrow">›</span>
+    </button>
+    <div class="sleeping-list" id="sleeping-list"></div>
+  </section>
+
+</div>
+
+<!-- Nav Bar -->
+<nav class="nav-bar">
+  <button class="nav-item active">
+    <span class="nav-icon">✦</span>
+    <span class="nav-text">今日</span>
+  </button>
+  <button class="nav-item" onclick="showToast('準備中')">
+    <span class="nav-icon">◎</span>
+    <span class="nav-text">星座</span>
+  </button>
+  <button class="nav-item" onclick="showToast('準備中')">
+    <span class="nav-icon">☰</span>
+    <span class="nav-text">レビュー</span>
+  </button>
+  <button class="nav-item" onclick="showToast('準備中')">
+    <span class="nav-icon">◉</span>
+    <span class="nav-text">設定</span>
+  </button>
+</nav>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ── Routine definitions (Phase 1 hardcoded) ────────────────────────────────────
+// Source: config/star_chart_routines.yaml
+const ROUTINES = [
+  { id: 'R001', name: '起床・ストレッチ', timeslot: '朝',    hour: 6,    status: '部分点灯' },
+  { id: 'R002', name: '朝散歩',           timeslot: '朝',    hour: 6,    status: '未着手' },
+  { id: 'R004', name: 'AI英会話',         timeslot: '朝',    hour: 7,    status: '微睡み' },
+  { id: 'R005', name: 'IGストーリー',     timeslot: '朝',    hour: 8,    status: '点灯' },
+  { id: 'R006', name: '投資チェック',     timeslot: '朝',    hour: 9,    status: '部分点灯' },
+  { id: 'R011', name: '日曜カフェ',       timeslot: '日曜朝', hour: 9,   status: '点灯' },
+  { id: 'R012', name: 'Instagram制作',    timeslot: '柔軟',  hour: null, status: '部分点灯' },
+  { id: 'R015', name: '英語振り返り',     timeslot: '夜',    hour: 17,   status: '微睡み' },
+  { id: 'R017', name: 'ワインノート',     timeslot: '夜',    hour: 19,   status: '部分点灯' },
+  { id: 'R018', name: '読書・デトックス', timeslot: '夜',    hour: 22,   status: '部分点灯' },
+];
+
+// Timeslot ordering for display
+const TIMESLOT_ORDER = [
+  { key: '朝',    label: '朝',      ids: ['R001','R002','R005','R006','R011'] },
+  { key: '夜',    label: '夜',      ids: ['R015','R017','R018'] },
+  { key: '柔軟',  label: 'いつでも', ids: ['R012'] },
+];
+
+const STORAGE_KEY = 'star_chart_events';
+const TL_START = 6;
+const TL_END   = 22;
+const TL_SEGS  = TL_END - TL_START;  // 16
+
+// ── Data helpers ───────────────────────────────────────────────────────────────
+function loadEvents() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  catch (_) { return []; }
+}
+
+function saveEvents(arr) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(arr)); } catch (_) {}
+}
+
+function todayStr() {
+  return new Date().toDateString();
+}
+
+function getTodayEvents() {
+  const today = todayStr();
+  return loadEvents().filter(e => new Date(e.ts).toDateString() === today);
+}
+
+function getLitIds() {
+  const s = new Set();
+  getTodayEvents().forEach(e => { if (e.credit >= 1.0) s.add(e.routine_id); });
+  return s;
+}
+
+function getActiveRoutines() {
+  const isSunday = new Date().getDay() === 0;
+  return ROUTINES.filter(r => {
+    if (r.status === '微睡み') return false;
+    if (r.timeslot === '日曜朝' && !isSunday) return false;
+    return true;
+  });
+}
+
+function getSleepingRoutines() {
+  return ROUTINES.filter(r => r.status === '微睡み');
+}
+
+// ── Toggle ─────────────────────────────────────────────────────────────────────
+function toggleRoutine(routineId) {
+  const events = loadEvents();
+  const today = todayStr();
+  const hasLit = events.some(e =>
+    new Date(e.ts).toDateString() === today &&
+    e.routine_id === routineId &&
+    e.credit >= 1.0
+  );
+
+  if (hasLit) {
+    const filtered = events.filter(e => {
+      if (new Date(e.ts).toDateString() !== today) return true;
+      if (e.routine_id !== routineId) return true;
+      if (e.credit < 1.0) return true;
+      return false;
+    });
+    saveEvents(filtered);
+    showToast('取り消しました');
+  } else {
+    events.push({ ts: new Date().toISOString(), routine_id: routineId, credit: 1.0, source: 'manual' });
+    saveEvents(events);
+    showToast('✦ 点灯しました');
+  }
+  render();
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────────
+function formatDate(d) {
+  const m   = d.getMonth() + 1;
+  const day = d.getDate();
+  const dow = ['日','月','火','水','木','金','土'][d.getDay()];
+  return `${m}月${day}日（${dow}）`;
+}
+
+function renderHeader(litIds, active) {
+  document.getElementById('today-date').textContent = formatDate(new Date());
+  const litCount = active.filter(r => litIds.has(r.id)).length;
+  const total    = active.length;
+  const pct      = total > 0 ? Math.round(litCount / total * 100) : 0;
+  document.getElementById('lit-bar-fill').style.width = pct + '%';
+  document.getElementById('lit-bar-pct').textContent  = total > 0 ? pct + '%' : '—';
+}
+
+function renderTimeline(litIds) {
+  const bar = document.getElementById('timeline-bar');
+  bar.innerHTML = '';
+
+  const litHours = new Set();
+
+  // Events with timestamps
+  getTodayEvents().forEach(e => {
+    if (e.credit >= 1.0) {
+      const h = new Date(e.ts).getHours();
+      if (h >= TL_START && h < TL_END) litHours.add(h);
+    }
+  });
+
+  // Also mark expected hours of lit routines
+  ROUTINES.forEach(r => {
+    if (litIds.has(r.id) && r.hour !== null && r.hour >= TL_START && r.hour < TL_END) {
+      litHours.add(r.hour);
+    }
+  });
+
+  for (let h = TL_START; h < TL_END; h++) {
+    const seg = document.createElement('div');
+    seg.className = 'tl-seg' + (litHours.has(h) ? ' lit' : '');
+    bar.appendChild(seg);
+  }
+}
+
+function renderChips(litIds) {
+  const active  = getActiveRoutines();
+  const section = document.getElementById('chips-section');
+  section.innerHTML = '';
+
+  TIMESLOT_ORDER.forEach(group => {
+    const routinesInGroup = active.filter(r => group.ids.includes(r.id));
+    if (routinesInGroup.length === 0) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'timeslot-group';
+
+    const lbl = document.createElement('div');
+    lbl.className = 'timeslot-label';
+    lbl.textContent = group.label;
+    wrapper.appendChild(lbl);
+
+    const grid = document.createElement('div');
+    grid.className = 'chips-grid';
+
+    routinesInGroup.forEach(r => {
+      const btn = document.createElement('button');
+      btn.className = 'chip' + (litIds.has(r.id) ? ' lit' : '');
+      btn.textContent = r.name;
+      btn.dataset.id  = r.id;
+      btn.addEventListener('click', () => toggleRoutine(r.id));
+      grid.appendChild(btn);
+    });
+
+    wrapper.appendChild(grid);
+    section.appendChild(wrapper);
+  });
+}
+
+function renderSleeping() {
+  const sleeping = getSleepingRoutines();
+  document.getElementById('sleeping-count').textContent = sleeping.length;
+
+  const list = document.getElementById('sleeping-list');
+  list.innerHTML = '';
+  sleeping.forEach(r => {
+    const btn = document.createElement('button');
+    btn.className = 'chip sleeping';
+    btn.textContent = r.name;
+    list.appendChild(btn);
+  });
+}
+
+function render() {
+  const litIds = getLitIds();
+  const active = getActiveRoutines();
+  renderHeader(litIds, active);
+  renderTimeline(litIds);
+  renderChips(litIds);
+  renderSleeping();
+}
+
+// ── Sleeping toggle ────────────────────────────────────────────────────────────
+document.getElementById('sleeping-toggle').addEventListener('click', () => {
+  const list  = document.getElementById('sleeping-list');
+  const arrow = document.getElementById('sleeping-arrow');
+  const open  = list.classList.toggle('open');
+  arrow.textContent = open ? '‹' : '›';
+});
+
+// ── Toast ──────────────────────────────────────────────────────────────────────
+let _toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+}
+window.showToast = showToast;
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+render();
+
+// ── Service Worker ─────────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('SW registered', reg.scope))
+      .catch(err => console.log('SW registration failed', err));
+  });
+}
+</script>
+</body>
+</html>
