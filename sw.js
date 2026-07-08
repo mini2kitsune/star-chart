@@ -1,4 +1,4 @@
-const CACHE_NAME = 'star-chart-v05-otp-code';
+const CACHE_NAME = 'star-chart-v06-otp8';
 const STATIC_ASSETS = [
   '/star-chart/',
   '/star-chart/index.html',

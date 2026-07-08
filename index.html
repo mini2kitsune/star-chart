@@ -181,16 +181,16 @@
   <!-- ステップ1: メール入力 -->
   <div id="step1">
     <input type="email" id="authEmail" placeholder="メールアドレス" autocomplete="email" autocapitalize="off" autocorrect="off">
-    <button type="button" class="btn" id="authSendCode">6桁コードをメールで受け取る</button>
+    <button type="button" class="btn" id="authSendCode">コードをメールで受け取る</button>
   </div>
 
   <!-- ステップ2: コード入力（メール送信後に表示） -->
   <div id="step2" style="display:none;">
     <div style="font-size:12px;color:#8A7A64;margin-bottom:12px;line-height:1.6;">
       <span id="sentToEmail"></span> にメールを送りました。<br>
-      6桁のコードを入力してくだされ。
+      メール本文のコード（6〜8桁）を入力してくだされ。
     </div>
-    <input type="text" id="authCode" placeholder="6桁のコード" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" style="text-align:center;letter-spacing:.5em;font-size:20px;">
+    <input type="text" id="authCode" placeholder="コードを入力" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="one-time-code" style="text-align:center;letter-spacing:.3em;font-size:20px;">
     <button type="button" class="btn" id="authVerifyCode">確認して星図に入る</button>
     <button type="button" class="btn quiet" id="authBackToEmail">メールアドレスを変える</button>
   </div>
@@ -779,7 +779,7 @@ async function handleVerifyCode(){
   console.log('handleVerifyCode called');
   if(!sbClient){ document.getElementById('authMsg').textContent = '通信の準備が整っていません。'; return; }
   const token = document.getElementById('authCode').value.trim();
-  if(!token || token.length !== 6){ document.getElementById('authMsg').textContent = '6桁のコードを入力してくだされ'; return; }
+  if(!token || token.length < 6){ document.getElementById('authMsg').textContent = 'メールに届いたコードを入力してくだされ'; return; }
   document.getElementById('authMsg').textContent = '確認中…';
   try{
     const { data, error } = await sbClient.auth.verifyOtp({
